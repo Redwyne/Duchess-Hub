@@ -245,8 +245,12 @@ def build_ass(words, mode: str, font: str, font_weight: str, size_pct: float, co
         for i, w in enumerate(words):
             group.append(w)
             text = r"\N".join(_wrap_build_line(group))
-            start = group[0]["start"]
-            end = w["end"]
+            # Chaque étape ne doit être visible que jusqu'à l'apparition du mot suivant —
+            # sinon les étapes successives se chevauchent et s'empilent à l'écran (bug vu au test).
+            start = w["start"]
+            end = words[i + 1]["start"] if i + 1 < len(words) else w["end"]
+            if end <= start:
+                end = w["end"]
             lines.append(f"Dialogue: 0,{_ass_ts(start)},{_ass_ts(end)},Default,{text.upper()}")
             if len(group) >= 3:
                 group = []
