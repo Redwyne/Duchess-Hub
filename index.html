@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Duchess · Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Poppins:wght@700;800&family=Playfair+Display:wght@600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/calendar.css">
+<link rel="stylesheet" href="css/admin.css">
+</head>
+<body>
+
+<div class="bg-decor" aria-hidden="true">
+  <div class="blob blob-a"></div>
+  <div class="blob blob-b"></div>
+  <div class="blob blob-c"></div>
+  <img src="assets/logo-white-bg.png" alt="" class="bg-logo" />
+  <div class="grid-overlay"></div>
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <img src="assets/logo-white.png" alt="Duchess" class="brand-logo" />
+    <span class="brand-text">DUCHESS <em>· Hub</em></span>
+  </div>
+  <nav class="tabnav">
+    <button type="button" class="tab-btn" data-tab-target="pitch">Pitch</button>
+    <button type="button" class="tab-btn" data-tab-target="tiktok">TikTok</button>
+    <button type="button" class="tab-btn" data-tab-target="stats">Stats<span class="soon-dot" title="Bientôt"></span></button>
+    <button type="button" class="tab-btn" data-tab-target="srt">Sous-titres<span class="soon-dot" title="Bientôt"></span></button>
+    <button type="button" class="tab-btn" data-tab-target="strategie">Stratégie<span class="soon-dot" title="Bientôt"></span></button>
+    <button type="button" class="tab-btn" data-tab-target="admin">🔒 Admin</button>
+  </nav>
+</header>
+
+<!-- ============================= ONGLET PITCH ============================= -->
+<div id="tab-pitch" class="tab-panel">
+<main class="layout">
+
+  <aside class="guide-rail">
+    <div class="guide-kicker">Comment ça marche</div>
+    <h2>Un pitch qui s'améliore à chaque titre</h2>
+    <p class="guide-intro">L'IA s'appuie sur les règles du label et sur l'historique des retours précédents pour proposer des pitchs de plus en plus proches de ce que tu attends.</p>
+
+    <ol class="timeline">
+      <li class="tl-item">
+        <div class="tl-num">1</div>
+        <div class="tl-body">
+          <div class="tl-title">Remplis le formulaire</div>
+          <div class="tl-text"><span class="hl">Seuls artiste et titre sont obligatoires</span> — contexte, infos, actu, chiffres, thème, angle et paroles sont optionnels. Plus c'est précis, meilleur est le pitch, mais rien n'est inventé à la place d'un champ vide.</div>
+        </div>
+      </li>
+      <li class="tl-item">
+        <div class="tl-num">2</div>
+        <div class="tl-body">
+          <div class="tl-title">Reçois 4 propositions</div>
+          <div class="tl-text"><b>3 angles courts</b> (format DSP, ≤500 caractères) et <b>1 version longue</b> (~1000 caractères) réutilisable en dossier de presse ou ailleurs.</div>
+        </div>
+      </li>
+      <li class="tl-item">
+        <div class="tl-num">3</div>
+        <div class="tl-body">
+          <div class="tl-title">Donne un retour</div>
+          <div class="tl-text">Indique le pitch que tu préfères et explique pourquoi. Chaque retour alimente la base de connaissance utilisée pour les prochains pitchs — pas besoin de repasser par Claude.</div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="tip-box">
+      <span class="tip-icon">⚠️</span>
+      L'IA n'invente jamais de chiffre ou de featuring : ce qui n'est pas renseigné dans le formulaire n'apparaîtra pas dans le pitch.
+    </div>
+  </aside>
+
+  <section class="panel">
+    <div class="panel-card" id="formCard">
+
+      <div class="panel-head">
+        <h1>Crée un pitch</h1>
+        <p class="lead">Seuls <b>artiste</b> et <b>titre</b> sont obligatoires — tous les autres champs sont optionnels, laisse-les vides si tu ne sais pas, l'IA n'inventera rien à leur place.</p>
+      </div>
+
+      <form id="genForm" autocomplete="off">
+        <div class="field-row">
+          <div class="field">
+            <label for="artiste">Artiste <span class="synced-tag">Synchronisé</span></label>
+            <input id="artiste" placeholder="TW" />
+          </div>
+          <div class="field">
+            <label for="titre">Titre du morceau <span class="synced-tag">Synchronisé</span></label>
+            <input id="titre" placeholder="Toi & Moi" />
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="contexte">Contexte (optionnel)</label>
+          <textarea id="contexte" placeholder="Sortie du single, suite d'un précédent titre, featuring, etc."></textarea>
+        </div>
+
+        <div class="field">
+          <label for="infos">Infos importantes (optionnel)</label>
+          <textarea id="infos" placeholder="Ce qu'il faut absolument mentionner ou éviter"></textarea>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="actu">Actualité / accueil éditorial (optionnel)</label>
+            <textarea id="actu" placeholder="Repérage playlist, presse, TV..."></textarea>
+          </div>
+          <div class="field">
+            <label for="chiffres">Chiffres (optionnel)</label>
+            <textarea id="chiffres" placeholder="Streams, vues, classement — laisse vide si aucun"></textarea>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="theme">Thème du son (optionnel) <span class="synced-tag">Synchronisé</span></label>
+            <input id="theme" placeholder="Amour à distance, fête, rupture..." />
+          </div>
+          <div class="field">
+            <label for="angle">Angle souhaité (optionnel)</label>
+            <input id="angle" placeholder="Ce que tu veux mettre en avant" />
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="paroles">Paroles du son (optionnel) <span class="synced-tag">Synchronisé</span></label>
+          <textarea id="paroles" placeholder="Colle les paroles ici — utilisées uniquement pour comprendre le thème et l'ambiance" style="min-height: 110px;"></textarea>
+          <div class="hint">💡 Se remplit aussi automatiquement si tu as déjà lancé une génération sur l'onglet TikTok (paroles récupérées via Flowstage).</div>
+        </div>
+
+        <button class="go" id="go" type="submit">Générer le pitch</button>
+        <div class="status" id="status"></div>
+      </form>
+
+      <div class="progress-box" id="progressBox">
+        <div class="progress-head">
+          <span class="progress-pct" id="progressPct">0%</span>
+          <span class="progress-label" id="progressLabel">Envoi en cours…</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-steps" id="progressSteps"></div>
+      </div>
+
+    </div>
+
+    <div class="results-box" id="resultsBox">
+      <div class="results-head">
+        <h2>Propositions</h2>
+        <p class="lead">Clique sur « Préférer » pour indiquer ton favori avant d'envoyer un retour.</p>
+      </div>
+
+      <div class="results-grid" id="resultsGrid"></div>
+
+      <div class="feedback-card">
+        <h3>Retour</h3>
+        <p class="lead">Ce que tu écris ici améliore les prochains pitchs générés — pas besoin de repasser par Claude.</p>
+        <div class="field">
+          <textarea id="retourText" placeholder="Ex: trop long, manque l'angle emotion, evite tel mot..." style="min-height: 90px;"></textarea>
+        </div>
+        <div class="feedback-actions">
+          <button class="feedback-submit" id="sendFeedback" type="button">Envoyer le retour</button>
+          <button class="feedback-submit regen" id="regenWithFeedback" type="button">Régénérer avec ce retour</button>
+        </div>
+        <div class="status" id="feedbackStatus"></div>
+      </div>
+
+      <button class="new-pitch-btn" id="newPitch" type="button">Recommencer à zéro</button>
+    </div>
+
+    <div class="panel-foot">Duchess Production · Label ARK — pitching interne</div>
+  </section>
+
+</main>
+</div>
+
+<!-- ============================= ONGLET TIKTOK ============================= -->
+<div id="tab-tiktok" class="tab-panel">
+<main class="layout">
+
+  <aside class="guide-rail">
+    <div class="guide-kicker">Guide complet</div>
+    <h2>Du son brut au TikTok publié</h2>
+    <p class="guide-intro">Six étapes, de Flowstage jusqu'à la publication automatique.</p>
+
+    <ol class="timeline">
+      <li class="tl-item">
+        <div class="tl-num">0</div>
+        <div class="tl-body">
+          <div class="tl-title">Créer l'aesthetic dans Flowstage</div>
+          <div class="tl-text">À la main : uploade le son, laisse Flowstage extraire les paroles automatiquement (1-2 min) <span class="hl">et définit des sections précises (ex : couplet, refrain)</span>. Cette étape ne se fait pas ici.</div>
+        </div>
+      </li>
+      <li class="tl-item">
+        <div class="tl-num">1</div>
+        <div class="tl-body">
+          <div class="tl-title">Remplir le formulaire</div>
+          <div class="tl-text">Le <b>nom du single</b> doit être identique, casse comprise, à l'aesthetic Flowstage — sinon rien ne matche.</div>
+        </div>
+      </li>
+      <li class="tl-item">
+        <div class="tl-num">2</div>
+        <div class="tl-body">
+          <div class="tl-title">Choisir ce qui est généré</div>
+          <div class="tl-text"><b>Hooks</b> (overlay Flowstage) · <b>Vidéos</b> (stock Pexels → Flowstage) · <b>Légendes</b> (base utilisée par la publication auto).</div>
+        </div>
+      </li>
+      <li class="tl-item">
+        <div class="tl-num">3</div>
+        <div class="tl-body">
+          <div class="tl-title">Lancer et suivre</div>
+          <div class="tl-text">La barre suit chaque étape Make en direct — 30 s à 2 min selon la sélection.</div>
+        </div>
+      </li>
+      <li class="tl-item">
+        <div class="tl-num">4</div>
+        <div class="tl-body">
+          <div class="tl-title">Générer les vidéos dans Flowstage</div>
+          <div class="tl-text">
+            Tout ce dont tu as besoin (hooks, vidéos stock, légendes) est déjà dans l'aesthetic. Génère une première vidéo test en réglant bien les options, ajuste à ta guise, sauvegarde comme template, génère par lots de 10, approuve, puis <b>Bulk export videos</b>.
+            <br><br>
+            Décompresse le zip et dépose les vidéos dans le dossier du compte TikTok concerné :
+            <a class="sp-button" href="https://duchessms-my.sharepoint.com/:f:/g/personal/m_kamel_duchess_company1/IgBnkWrafKx-SKcWW61I8plYAa9p5HGh5nKDJXJcj02jlCY?e=XQqePp" target="_blank" rel="noopener">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>
+              <span>Dossier SharePoint · TIKTOK EDITS</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+          </div>
+        </div>
+      </li>
+      <li class="tl-item">
+        <div class="tl-num">5</div>
+        <div class="tl-body">
+          <div class="tl-title">Publication automatique</div>
+          <div class="tl-text">Rien à faire de plus : la publication TikTok automatique pioche toute seule chaque heure dans les vidéos déposées et dans la base de légendes.</div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="tip-box">
+      <span class="tip-icon">⚠️</span>
+      Barre bloquée longtemps sur « recherche de l'aesthetic » → le nom saisi ne correspond pas exactement à Flowstage.
+    </div>
+  </aside>
+
+  <section class="panel">
+    <div class="panel-card">
+
+      <div class="panel-head">
+        <h1>Prépare le contenu TikTok d'un single</h1>
+        <p class="lead">Hooks, vidéos et légendes générés automatiquement à partir du morceau.</p>
+      </div>
+
+      <form id="tt-genForm" autocomplete="off">
+        <div class="field">
+          <label for="tt-single">Nom du single <span class="synced-tag">Synchronisé</span></label>
+          <input id="tt-single" placeholder="Toi & Moi" />
+          <div class="hint">⚠️ Doit correspondre EXACTEMENT au nom de l'aesthetic créée dans Flowstage</div>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="tt-artiste">Artiste <span class="synced-tag">Synchronisé</span></label>
+            <input id="tt-artiste" placeholder="TW feat. Jyeuhair" />
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="tt-intention">Intention / ambiance <span class="synced-tag">Synchronisé</span></label>
+          <textarea id="tt-intention" placeholder="Décris le mood, le thème, l'énergie du morceau…"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="tt-keywords">Mots-clés vidéo (optionnel)</label>
+          <input id="tt-keywords" placeholder="amoureux, ville la nuit, pluie" />
+        </div>
+
+        <div class="field">
+          <label>Que veux-tu générer ?</label>
+          <div class="modes">
+            <button type="button" class="mode-btn" data-gen="hooks">
+              <span class="mode-ico">✦</span><span>Hooks</span>
+            </button>
+            <button type="button" class="mode-btn" data-gen="videos">
+              <span class="mode-ico">▶</span><span>Vidéos</span>
+            </button>
+            <button type="button" class="mode-btn" data-gen="legendes">
+              <span class="mode-ico">✎</span><span>Légendes</span>
+            </button>
+          </div>
+          <button class="select-all" id="tt-selectAll" type="button">Tout sélectionner</button>
+        </div>
+
+        <div class="field counts-field" id="tt-countsField">
+          <label>Quantités</label>
+          <div class="counts-grid">
+            <div class="count-item" data-count-for="hooks">
+              <div class="count-value" id="tt-hooksCountVal">50</div>
+              <div class="vslider-wrap">
+                <input type="range" class="vslider" id="tt-hooksCount" min="5" max="100" step="1" value="50" />
+              </div>
+              <label for="tt-hooksCount">Hooks</label>
+            </div>
+            <div class="count-item" data-count-for="videos">
+              <div class="count-value" id="tt-videosCountVal">3</div>
+              <div class="vslider-wrap">
+                <input type="range" class="vslider" id="tt-videosCount" min="1" max="15" step="1" value="3" />
+              </div>
+              <label for="tt-videosCount">Vidéos / mot-clé</label>
+            </div>
+            <div class="count-item" data-count-for="legendes">
+              <div class="count-value" id="tt-legendesCountVal">50</div>
+              <div class="vslider-wrap">
+                <input type="range" class="vslider" id="tt-legendesCount" min="5" max="100" step="1" value="50" />
+              </div>
+              <label for="tt-legendesCount">Légendes</label>
+            </div>
+          </div>
+          <div class="hint" id="tt-videosCountHint">⚠️ Le nombre de vidéos ajoutées = (mots-clés générés par l'IA, ~5-8) × ce nombre — pas un total exact.</div>
+        </div>
+
+        <div class="field">
+          <label>Langue des hooks &amp; légendes</label>
+          <div class="lang-toggle" id="tt-langToggle" role="group">
+            <button type="button" class="lang-btn active" data-lang="français">Français</button>
+            <button type="button" class="lang-btn" data-lang="anglais">English</button>
+          </div>
+        </div>
+
+        <button class="go" id="tt-go" type="submit">
+          <span>Go</span>
+        </button>
+        <div class="status" id="tt-status"></div>
+      </form>
+
+      <div class="progress-box" id="tt-progressBox">
+        <div class="progress-head">
+          <span class="progress-pct" id="tt-progressPct">0%</span>
+          <span class="progress-label" id="tt-progressLabel">Envoi en cours…</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="tt-progressFill"></div>
+        </div>
+        <div class="progress-steps" id="tt-progressSteps"></div>
+      </div>
+
+    </div>
+
+    <div class="panel-foot">Duchess Production · Label ARK — pipeline interne</div>
+  </section>
+
+</main>
+
+<section class="calendar-section" id="tt-calendarSection">
+  <div class="calendar-card">
+    <div class="calendar-head">
+      <div>
+        <div class="guide-kicker">Publication</div>
+        <h2>Calendrier des posts programmés</h2>
+        <p class="lead">Ce qui est prévu sur Publer, compte par compte.</p>
+      </div>
+      <div class="calendar-nav">
+        <button type="button" class="cal-nav-btn" id="tt-calPrev" aria-label="Mois précédent">&lsaquo;</button>
+        <span class="cal-month-label" id="tt-calMonthLabel">—</span>
+        <button type="button" class="cal-nav-btn" id="tt-calNext" aria-label="Mois suivant">&rsaquo;</button>
+      </div>
+    </div>
+
+    <div class="cal-tabs" id="tt-calTabs"></div>
+
+    <div class="cal-grid-head">
+      <span>Lun</span><span>Mar</span><span>Mer</span><span>Jeu</span><span>Ven</span><span>Sam</span><span>Dim</span>
+    </div>
+    <div class="cal-grid" id="tt-calGrid"></div>
+
+    <div class="cal-status" id="tt-calStatus">Chargement…</div>
+  </div>
+</section>
+</div>
+
+<!-- ============================= ONGLETS A VENIR ============================= -->
+<div id="tab-stats" class="tab-panel">
+  <div class="placeholder-card">
+    <div class="guide-kicker">Bientôt disponible</div>
+    <h1>Récap stats (Soundcharts)</h1>
+    <p>Dashboard des stats d'audience par artiste — auditeurs mensuels, followers Spotify/Instagram/TikTok, placements playlists.</p>
+
+    <div class="field-row synced-fields">
+      <div class="field">
+        <label for="stats-artiste">Artiste <span class="synced-tag">Synchronisé</span></label>
+        <input id="stats-artiste" placeholder="TW" />
+      </div>
+      <div class="field">
+        <label for="stats-titre">Titre (si récap par single) <span class="synced-tag">Synchronisé</span></label>
+        <input id="stats-titre" placeholder="Toi & Moi" />
+      </div>
+    </div>
+
+    <p>Le script et le pipeline Make existent déjà (skill <b>soundcharts-recap</b>), reste à brancher un accès en lecture depuis ce hub.</p>
+    <div class="tip-box">
+      <span class="tip-icon">⚠️</span>
+      L'accès API Soundcharts prod doit être confirmé actif avant de brancher cet onglet en direct (sinon les données restent en sandbox).
+    </div>
+  </div>
+</div>
+
+<div id="tab-srt" class="tab-panel">
+<main class="layout">
+
+  <aside class="guide-rail">
+    <div class="guide-kicker">Comment ça marche</div>
+    <h2>Sous-titres synchronisés, à ton style</h2>
+    <p class="guide-intro">Deux façons d'obtenir des sous-titres calés sur les paroles — un fichier seul, ou la vidéo déjà incrustée dans le style choisi.</p>
+
+    <ol class="timeline">
+      <li class="tl-item">
+        <div class="tl-num">1</div>
+        <div class="tl-body">
+          <div class="tl-title">Choisis ton mode</div>
+          <div class="tl-text"><b>Fichier .srt</b> si tu veux juste le texte timé à réutiliser ailleurs, <b>vidéo sous-titrée</b> si tu veux le rendu final directement incrusté.</div>
+        </div>
+      </li>
+      <li class="tl-item">
+        <div class="tl-num">2</div>
+        <div class="tl-body">
+          <div class="tl-title">Upload ton fichier</div>
+          <div class="tl-text">Audio (mode fichier) ou vidéo (mode rendu) — glisse-dépose ou clique pour choisir.</div>
+        </div>
+      </li>
+      <li class="tl-item">
+        <div class="tl-num">3</div>
+        <div class="tl-body">
+          <div class="tl-title">Retrouve le single</div>
+          <div class="tl-text">Si ce morceau a déjà été traité ailleurs sur le hub (Flowstage, ou une génération précédente), les paroles timées sont réutilisées directement — pas de retranscription.</div>
+        </div>
+      </li>
+      <li class="tl-item">
+        <div class="tl-num">4</div>
+        <div class="tl-body">
+          <div class="tl-title">Règle le style (mode vidéo)</div>
+          <div class="tl-text">Police, taille, couleur et façon d'apparaître — aperçu en direct avant de lancer.</div>
+        </div>
+      </li>
+    </ol>
+
+    <div class="tip-box">
+      <span class="tip-icon">⚠️</span>
+      Backend en cours de mise en place — l'interface est prête, le bouton « Go » sera actif dès que le service de rendu est branché.
+    </div>
+  </aside>
+
+  <section class="panel">
+    <div class="panel-card">
+
+      <div class="panel-head">
+        <h1>Sous-titres</h1>
+        <p class="lead">Paroles synchronisées automatiquement — en fichier seul, ou directement incrustées sur ta vidéo.</p>
+      </div>
+
+      <div class="option-toggle" id="srt-optionToggle" role="group">
+        <button type="button" class="option-btn active" data-option="file">
+          <span class="option-ico">📝</span>
+          <span class="option-title">Fichier de sous-titres</span>
+          <span class="option-desc">Upload audio → .srt</span>
+        </button>
+        <button type="button" class="option-btn" data-option="video">
+          <span class="option-ico">🎬</span>
+          <span class="option-title">Vidéo sous-titrée</span>
+          <span class="option-desc">Upload vidéo → rendu stylé</span>
+        </button>
+      </div>
+
+      <form id="srt-genForm" autocomplete="off">
+
+        <div class="field-row">
+          <div class="field">
+            <label for="srt-artiste">Artiste <span class="synced-tag">Synchronisé</span></label>
+            <input id="srt-artiste" placeholder="TW" />
+          </div>
+          <div class="field">
+            <label for="srt-titre">Titre <span class="synced-tag">Synchronisé</span></label>
+            <input id="srt-titre" placeholder="Toi & Moi" />
+          </div>
+        </div>
+        <div class="hint">💡 Si ce single a déjà été traité ailleurs sur le hub, les paroles timées sont réutilisées automatiquement — pas besoin de retranscrire.</div>
+
+        <div class="field">
+          <label id="srt-dzLabel">Fichier audio</label>
+          <div class="dropzone" id="srt-dropzone" tabindex="0">
+            <input type="file" id="srt-fileInput" accept="audio/*,video/*" hidden />
+            <div class="dz-icon">⬆</div>
+            <div class="dz-text" id="srt-dzText">Glisse ton fichier ici, ou clique pour choisir</div>
+            <div class="dz-file" id="srt-dzFile"></div>
+          </div>
+        </div>
+
+        <div class="style-block" id="srt-styleBlock">
+          <div class="field">
+            <label>Préréglages <span class="hl" style="font-weight:600;">repérés dans le catalogue Duchess</span></label>
+            <div class="preset-row" id="srt-presetRow">
+              <button type="button" class="preset-chip active" data-preset="custom">Personnalisé</button>
+              <button type="button" class="preset-chip" data-preset="build-rond">Build rond (Toi &amp; Moi)</button>
+              <button type="button" class="preset-chip" data-preset="replace-serif">Mot-à-mot serif (Bullet)</button>
+              <button type="button" class="preset-chip" data-preset="phrase-plate">Phrase claire</button>
+            </div>
+            <div class="hint">Aperçus GIF réels à venir une fois le moteur de rendu branché — pour l'instant, aperçu texte en direct ci-dessous.</div>
+          </div>
+
+          <div class="style-grid">
+            <div class="style-controls">
+              <div class="field">
+                <label for="srt-font">Typo</label>
+                <select id="srt-font">
+                  <option value="'Poppins', sans-serif" data-weight="800">Poppins (gras rond)</option>
+                  <option value="'Playfair Display', serif" data-weight="700">Playfair Display (serif élégant)</option>
+                  <option value="'Space Grotesk', sans-serif" data-weight="700">Space Grotesk</option>
+                  <option value="'Inter', sans-serif" data-weight="500">Inter (fine)</option>
+                  <option value="'Bebas Neue', sans-serif" data-weight="400">Bebas Neue (condensé)</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="srt-size">Taille <span id="srt-sizeVal">10%</span></label>
+                <input type="range" class="hslider" id="srt-size" min="4" max="22" step="1" value="10" />
+              </div>
+              <div class="field">
+                <label for="srt-color">Couleur</label>
+                <input type="color" id="srt-color" value="#ffffff" />
+              </div>
+              <div class="field">
+                <label>Mode d'apparition</label>
+                <div class="modes" id="srt-modeGroup">
+                  <button type="button" class="mode-btn active" data-mode="replace">
+                    <span class="mode-ico">◉</span><span>Mot remplace l'autre</span>
+                  </button>
+                  <button type="button" class="mode-btn" data-mode="build">
+                    <span class="mode-ico">▤</span><span>Ligne qui se construit</span>
+                  </button>
+                  <button type="button" class="mode-btn" data-mode="full">
+                    <span class="mode-ico">▬</span><span>Phrase entière</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="preview-wrap">
+              <div class="preview-phone" id="srt-previewPhone">
+                <div class="preview-text" id="srt-previewText"></div>
+              </div>
+              <div class="preview-caption">Aperçu texte (pas encore le rendu vidéo réel)</div>
+            </div>
+          </div>
+        </div>
+
+        <button class="go" id="srt-go" type="submit">Go</button>
+        <div class="status" id="srt-status"></div>
+      </form>
+
+      <div class="progress-box" id="srt-progressBox">
+        <div class="progress-head">
+          <span class="progress-pct" id="srt-progressPct">0%</span>
+          <span class="progress-label" id="srt-progressLabel">Envoi en cours…</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="srt-progressFill"></div>
+        </div>
+        <div class="progress-steps" id="srt-progressSteps"></div>
+      </div>
+
+      <div class="results-box" id="srt-resultsBox">
+        <div class="results-head">
+          <h2>Résultat</h2>
+        </div>
+        <a class="sp-button" id="srt-downloadLink" href="#" download>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Télécharger le résultat</span>
+        </a>
+      </div>
+
+    </div>
+    <div class="panel-foot">Duchess Production · Label ARK — sous-titres internes</div>
+  </section>
+
+</main>
+</div>
+
+<div id="tab-strategie" class="tab-panel">
+  <div class="placeholder-card">
+    <div class="guide-kicker">Bientôt disponible</div>
+    <h1>Stratégie de communication</h1>
+    <p>Génère des idées de stratégie de com autour d'un artiste ou d'une sortie : angles réseaux sociaux, actions IRL, communication classique (presse, partenariats, événementiel).</p>
+
+    <div class="field-row synced-fields">
+      <div class="field">
+        <label for="strategie-artiste">Artiste <span class="synced-tag">Synchronisé</span></label>
+        <input id="strategie-artiste" placeholder="TW" />
+      </div>
+      <div class="field">
+        <label for="strategie-titre">Titre / sortie concernée <span class="synced-tag">Synchronisé</span></label>
+        <input id="strategie-titre" placeholder="Toi & Moi" />
+      </div>
+    </div>
+
+    <p>Spec à valider avec Michel avant le build : entrées (artiste, contexte/objectif, horizon, moyens) et format de sortie (plan structuré par canal ?).</p>
+  </div>
+</div>
+
+<!-- ============================= ONGLET ADMIN ============================= -->
+<div id="tab-admin" class="tab-panel">
+
+  <div class="admin-gate" id="admin-gate">
+    <div class="admin-gate-icon">🔒</div>
+    <h1>Espace Admin</h1>
+    <p>Section privée réservée à l'équipe Duchess. Connecte-toi pour accéder à l'inventaire.</p>
+    <button type="button" class="admin-btn admin-btn-primary" id="admin-reopen-login">Se connecter</button>
+  </div>
+
+  <div class="admin-dashboard" id="admin-dashboard">
+    <div class="admin-sidebar">
+      <div class="admin-nav-item active">📦 Inventaire</div>
+      <div class="admin-nav-item disabled" title="Bientôt disponible">💰 Budgets Projets</div>
+      <div class="admin-nav-spacer"></div>
+      <div class="admin-nav-item" id="admin-logout">↩ Déconnexion</div>
+    </div>
+    <div class="admin-main">
+      <div class="admin-topbar">
+        <h1>📦 Inventaire</h1>
+        <button class="admin-btn admin-btn-primary admin-btn-sm" id="admin-add-row">+ Ajouter un élément</button>
+      </div>
+      <div id="admin-sync-banner"></div>
+      <div class="admin-sheet-tabs" id="admin-sheet-tabs"></div>
+      <div class="admin-toolbar">
+        <input type="text" id="admin-search-input" placeholder="Rechercher (nom, code article, fournisseur...)">
+        <select id="admin-filter-etat"><option value="">Tous les états</option></select>
+      </div>
+      <div id="admin-content"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Login popup -->
+<div class="admin-overlay hidden" id="admin-login-overlay">
+  <div class="admin-modal">
+    <h2>Espace ADMIN</h2>
+    <div class="admin-modal-sub">Connexion requise pour accéder aux données internes.</div>
+    <form id="admin-login-form">
+      <div class="admin-field">
+        <label>Adresse email</label>
+        <input type="email" id="admin-login-email" autocomplete="username" required>
+      </div>
+      <div class="admin-field">
+        <label>Mot de passe</label>
+        <input type="password" id="admin-login-password" autocomplete="current-password" required>
+      </div>
+      <div class="admin-error-msg" id="admin-login-error"></div>
+      <div class="admin-modal-actions">
+        <button type="button" class="admin-btn admin-btn-ghost" id="admin-cancel-login">Annuler</button>
+        <button type="submit" class="admin-btn admin-btn-primary">Se connecter</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Add/edit item popup -->
+<div class="admin-overlay hidden" id="admin-row-overlay">
+  <div class="admin-modal admin-modal-wide">
+    <h2 id="admin-row-modal-title">Ajouter un élément</h2>
+    <div class="admin-modal-sub" id="admin-row-modal-sub"></div>
+    <form id="admin-row-form">
+      <div class="admin-grid2" id="admin-row-fields"></div>
+      <div class="admin-error-msg" id="admin-row-error"></div>
+      <div class="admin-modal-actions">
+        <button type="button" class="admin-btn admin-btn-ghost" id="admin-cancel-row">Annuler</button>
+        <button type="submit" class="admin-btn admin-btn-primary" id="admin-save-row">Enregistrer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="admin-toast-container" id="admin-toast-container"></div>
+
+<script src="js/tabs.js"></script>
+<script src="js/shared.js"></script>
+<script src="js/pitch.js"></script>
+<script src="js/tiktok.js"></script>
+<script src="js/tiktok-calendar.js"></script>
+<script src="js/subtitles.js"></script>
+<script src="js/admin.js"></script>
+</body>
+</html>
