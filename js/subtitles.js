@@ -21,6 +21,15 @@
   const sizeSlider = document.getElementById("srt-size");
   const sizeVal = document.getElementById("srt-sizeVal");
   const colorInput = document.getElementById("srt-color");
+  const caseSel = document.getElementById("srt-case");
+  const positionSel = document.getElementById("srt-position");
+  const effectSel = document.getElementById("srt-effect");
+  const fondSel = document.getElementById("srt-fond");
+  const outlineColorInput = document.getElementById("srt-outlineColor");
+  const outlineWidthSel = document.getElementById("srt-outlineWidth");
+  const outlineLabel = document.getElementById("srt-outlineLabel");
+  const accentField = document.getElementById("srt-accentField");
+  const accentColorInput = document.getElementById("srt-accentColor");
   const modeBtns = document.querySelectorAll("#srt-modeGroup .mode-btn");
 
   const previewPhone = document.getElementById("srt-previewPhone");
@@ -44,9 +53,27 @@
   let selectedFile = null;
 
   const PRESETS = {
-    "build-rond": { font: "'Poppins', sans-serif", weight: 800, size: 13, color: "#ffffff", mode: "build" },
-    "replace-serif": { font: "'Playfair Display', serif", weight: 700, size: 15, color: "#e8e0d0", mode: "replace" },
-    "phrase-plate": { font: "'Inter', sans-serif", weight: 600, size: 7, color: "#f3c6e0", mode: "full" },
+    "build-rond": {
+      font: "'Poppins', sans-serif", weight: 800, size: 13, color: "#ffffff", mode: "build",
+      position: "centre", effect: "pop", fond: "contour", outlineColor: "#000000", outlineWidth: "normal", textCase: "majuscule",
+    },
+    "replace-serif": {
+      font: "'Playfair Display', serif", weight: 700, size: 15, color: "#e8e0d0", mode: "replace",
+      position: "centre", effect: "fade", fond: "contour", outlineColor: "#000000", outlineWidth: "fin", textCase: "majuscule",
+    },
+    "phrase-plate": {
+      font: "'Inter', sans-serif", weight: 600, size: 7, color: "#f3c6e0", mode: "full",
+      position: "bas", effect: "fade", fond: "plaque", outlineColor: "#1a1a22", outlineWidth: "normal", textCase: "normal",
+    },
+    "karaoke-punch": {
+      font: "'Anton', sans-serif", weight: 400, size: 11, color: "#ffffff", mode: "karaoke",
+      position: "bas", effect: "pop", fond: "contour", outlineColor: "#000000", outlineWidth: "epais", textCase: "majuscule",
+      accentColor: "#ffd400",
+    },
+    "manuscrite-pile": {
+      font: "'Caveat', cursive", weight: 700, size: 10, color: "#ffe8b0", mode: "stack",
+      position: "centre", effect: "fade", fond: "aucun", outlineColor: "#000000", outlineWidth: "aucun", textCase: "normal",
+    },
   };
 
   const state = { mode: "replace" };
@@ -102,10 +129,20 @@
     presetChips.forEach((c) => c.classList.toggle("active", c.dataset.preset === "custom"));
   }
 
+  function updateOutlineLabel() {
+    outlineLabel.textContent = fondSel.value === "plaque" ? "Couleur de la plaque" : "Couleur du contour";
+  }
+
   function setMode(mode, silent) {
     state.mode = mode;
     modeBtns.forEach((b) => b.classList.toggle("active", b.dataset.mode === mode));
-    if (!silent) markCustom();
+    accentField.style.display = mode === "karaoke" ? "" : "none";
+    if (!silent) {
+      markCustom();
+      // Casse par défaut la plus lisible selon le mode : "normale" pour la phrase entière
+      // (façon sous-titre classique), MAJUSCULES pour les modes punchy mot-à-mot.
+      caseSel.value = mode === "full" ? "normal" : "majuscule";
+    }
     restartPreviewAnim();
   }
 
@@ -122,6 +159,14 @@
     sizeSlider.value = p.size;
     sizeVal.textContent = p.size + "%";
     colorInput.value = p.color;
+    positionSel.value = p.position || "centre";
+    effectSel.value = p.effect || "none";
+    fondSel.value = p.fond || "contour";
+    outlineColorInput.value = p.outlineColor || "#000000";
+    outlineWidthSel.value = p.outlineWidth || "normal";
+    caseSel.value = p.textCase || "majuscule";
+    accentColorInput.value = p.accentColor || "#ffd400";
+    updateOutlineLabel();
     setMode(p.mode, true);
     updatePreviewStyle();
   }
@@ -136,39 +181,176 @@
     updatePreviewStyle();
   });
   colorInput.addEventListener("input", () => { markCustom(); updatePreviewStyle(); });
+  caseSel.addEventListener("change", () => { markCustom(); restartPreviewAnim(); });
+  positionSel.addEventListener("change", () => { markCustom(); updatePreviewStyle(); });
+  effectSel.addEventListener("change", () => { markCustom(); restartPreviewAnim(); });
+  fondSel.addEventListener("change", () => { markCustom(); updateOutlineLabel(); updatePreviewStyle(); });
+  outlineColorInput.addEventListener("input", () => { markCustom(); updatePreviewStyle(); });
+  outlineWidthSel.addEventListener("change", () => { markCustom(); updatePreviewStyle(); });
+  accentColorInput.addEventListener("input", () => { markCustom(); restartPreviewAnim(); });
+  updateOutlineLabel();
 
   // ---------------------------------------------------------------------
-  // Aperçu texte en direct (proxy en attendant le vrai moteur de rendu)
+  // Aperçu texte en direct (proxy en attendant le vrai moteur de rendu vidéo)
+  // — reproduit fidèlement la logique du backend (build_ass) : mêmes découpages
+  // par mode, même auto-fit anti-débordement, même surlignage karaoké.
   // ---------------------------------------------------------------------
-  const SAMPLE_BUILD_STEPS = ["IL", "IL REMET", "IL REMET\nRENDEZ-VOUS", "À", "À DEMAIN"];
-  const SAMPLE_REPLACE_WORDS = ["IL", "REMET", "RENDEZ-VOUS", "À", "DEMAIN"];
-  const SAMPLE_FULL_TEXT = "Il remet\nrendez-vous\nà demain";
+  const PREVIEW_WORDS = ["Il", "remet", "rendez-vous", "à", "demain", "transcription", "automatique"];
 
   let previewTimer = null;
+  let currentFrames = [];
+  let currentFrameIdx = 0;
+
+  function applyCase(s) {
+    return caseSel.value === "majuscule" ? s.toUpperCase() : s;
+  }
+
+  function wrapBuildLine(group) {
+    const text = group.join(" ");
+    const parts = text.split(" ");
+    if (parts.length <= 2) return [text];
+    const mid = Math.ceil(parts.length / 2);
+    return [parts.slice(0, mid).join(" "), parts.slice(mid).join(" ")];
+  }
+
+  function buildPreviewFrames(mode) {
+    const W = PREVIEW_WORDS;
+    const frames = [];
+
+    if (mode === "full") {
+      return [{ lines: ["Il remet rendez-vous", "à demain"], active: -1 }];
+    }
+
+    if (mode === "replace") {
+      W.forEach((w) => frames.push({ lines: [w], active: -1 }));
+      return frames;
+    }
+
+    if (mode === "build") {
+      let group = [];
+      W.forEach((w) => {
+        group.push(w);
+        frames.push({ lines: wrapBuildLine(group), active: -1 });
+        if (group.length >= 3) group = [];
+      });
+      return frames;
+    }
+
+    if (mode === "build_vertical") {
+      let group = [];
+      W.forEach((w) => {
+        group.push(w);
+        frames.push({ lines: group.slice(), active: -1 });
+        if (group.length >= 3) group = [];
+      });
+      return frames;
+    }
+
+    if (mode === "stack") {
+      const chunks = [];
+      for (let i = 0; i < W.length; i += 2) chunks.push(W.slice(i, i + 2).join(" "));
+      let win = [];
+      chunks.forEach((c) => {
+        win.push(c);
+        if (win.length > 3) win.shift();
+        frames.push({ lines: win.slice(), active: -1 });
+      });
+      return frames;
+    }
+
+    if (mode === "karaoke") {
+      for (let g = 0; g < W.length; g += 5) {
+        const group = W.slice(g, g + 5);
+        group.forEach((_, i) => frames.push({ lines: [group.join(" ")], active: i, groupWords: group }));
+      }
+      return frames;
+    }
+
+    return [{ lines: [W[0]], active: -1 }];
+  }
+
+  function fitPreviewFontSize(lines, basePx) {
+    const longest = Math.max(0, ...lines.map((l) => l.length));
+    if (!longest) return basePx;
+    const availPx = Math.max(40, (previewPhone.clientWidth || 190) - 28);
+    const ratio = 0.58; // heuristique générique, même esprit que FONT_META côté backend
+    const estWidth = longest * basePx * ratio;
+    if (estWidth <= availPx) return basePx;
+    return Math.max(basePx * 0.4, availPx / (longest * ratio));
+  }
+
+  function renderFrame(frame) {
+    if (!frame) return;
+    const lines = frame.lines.map(applyCase);
+    const basePx = Math.round((previewPhone.clientHeight || 320) * (parseInt(sizeSlider.value, 10) / 100));
+    const px = Math.round(fitPreviewFontSize(lines, basePx));
+    previewText.style.fontSize = px + "px";
+
+    if (frame.active >= 0 && frame.groupWords) {
+      const parts = frame.groupWords.map((w, i) => {
+        const t = applyCase(w);
+        return i === frame.active ? '<span style="color:' + accentColorInput.value + '">' + t + "</span>" : t;
+      });
+      previewText.innerHTML = parts.join(" ");
+    } else {
+      previewText.textContent = lines.join("\n");
+    }
+  }
+
+  function applyPreviewEffect() {
+    previewText.classList.remove("anim-fade", "anim-pop", "anim-slide");
+    void previewText.offsetWidth; // force le reflow pour rejouer l'animation à chaque frame
+    const eff = effectSel.value;
+    if (eff === "fade") previewText.classList.add("anim-fade");
+    else if (eff === "pop") previewText.classList.add("anim-pop");
+    else if (eff === "slide") previewText.classList.add("anim-slide");
+  }
 
   function updatePreviewStyle() {
     previewText.style.fontFamily = fontSel.value;
     previewText.style.fontWeight = selectedFontWeight();
     previewText.style.color = colorInput.value;
-    const px = Math.round((previewPhone.clientHeight || 320) * (parseInt(sizeSlider.value, 10) / 100));
-    previewText.style.fontSize = px + "px";
+
+    const posMap = { haut: "flex-start", centre: "center", bas: "flex-end" };
+    previewPhone.style.alignItems = posMap[positionSel.value] || "center";
+
+    const fond = fondSel.value;
+    if (fond === "plaque") {
+      previewText.style.background = outlineColorInput.value;
+      previewText.style.padding = "6px 12px";
+      previewText.style.borderRadius = "6px";
+      previewText.style.webkitTextStroke = "0px";
+      previewText.style.textShadow = "none";
+    } else if (fond === "aucun") {
+      previewText.style.background = "transparent";
+      previewText.style.padding = "0";
+      previewText.style.webkitTextStroke = "0px";
+      previewText.style.textShadow = "none";
+    } else {
+      const widthPx = { fin: "0.5px", normal: "1px", epais: "2px", aucun: "0px" }[outlineWidthSel.value] || "1px";
+      previewText.style.background = "transparent";
+      previewText.style.padding = "0";
+      previewText.style.webkitTextStroke = widthPx + " " + outlineColorInput.value;
+      previewText.style.textShadow = "0 2px 10px rgba(0,0,0,.5), 0 0 1px rgba(0,0,0,.8)";
+    }
+
+    if (currentFrames.length) renderFrame(currentFrames[currentFrameIdx]);
   }
 
   function restartPreviewAnim() {
     if (previewTimer) { clearInterval(previewTimer); previewTimer = null; }
     updatePreviewStyle();
 
-    if (state.mode === "full") {
-      previewText.textContent = SAMPLE_FULL_TEXT;
-      return;
-    }
+    currentFrames = buildPreviewFrames(state.mode);
+    currentFrameIdx = 0;
+    applyPreviewEffect();
+    renderFrame(currentFrames[0]);
 
-    const seq = state.mode === "build" ? SAMPLE_BUILD_STEPS : SAMPLE_REPLACE_WORDS;
-    let i = 0;
-    previewText.textContent = seq[0];
+    if (currentFrames.length <= 1) return;
     previewTimer = setInterval(() => {
-      i = (i + 1) % seq.length;
-      previewText.textContent = seq[i];
+      currentFrameIdx = (currentFrameIdx + 1) % currentFrames.length;
+      applyPreviewEffect();
+      renderFrame(currentFrames[currentFrameIdx]);
     }, 850);
   }
 
@@ -280,12 +462,6 @@
       return;
     }
 
-    if (BACKEND_BASE_URL.indexOf("REMPLACE-MOI") !== -1) {
-      statusEl.className = "status err";
-      statusEl.textContent = "Backend pas encore branché — cette partie sera active dès que le service de rendu est déployé.";
-      return;
-    }
-
     const jobId = uuid();
     const fd = new FormData();
     fd.append("job_id", jobId);
@@ -299,6 +475,13 @@
       fd.append("size_pct", sizeSlider.value);
       fd.append("color", colorInput.value);
       fd.append("mode", state.mode);
+      fd.append("position", positionSel.value);
+      fd.append("effect", effectSel.value);
+      fd.append("outline_color", outlineColorInput.value);
+      fd.append("outline_width", outlineWidthSel.value);
+      fd.append("fond", fondSel.value);
+      fd.append("text_case", caseSel.value);
+      fd.append("accent_color", accentColorInput.value);
     }
 
     goBtn.disabled = true;

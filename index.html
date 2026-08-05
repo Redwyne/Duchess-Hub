@@ -6,7 +6,7 @@
 <title>Duchess · Hub</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Poppins:wght@700;800&family=Playfair+Display:wght@600;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Poppins:wght@700;800&family=Playfair+Display:wght@600;700&family=Bebas+Neue&family=Montserrat:wght@700;800&family=Anton&family=Oswald:wght@600;700&family=Roboto+Condensed:wght@700&family=Archivo+Black&family=Bangers&family=Righteous&family=Luckiest+Guy&family=Caveat:wght@600;700&family=Permanent+Marker&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 <link rel="stylesheet" href="css/calendar.css">
 <link rel="stylesheet" href="css/admin.css">
@@ -30,7 +30,7 @@
     <button type="button" class="tab-btn" data-tab-target="pitch">Pitch</button>
     <button type="button" class="tab-btn" data-tab-target="tiktok">TikTok</button>
     <button type="button" class="tab-btn" data-tab-target="stats">Stats<span class="soon-dot" title="Bientôt"></span></button>
-    <button type="button" class="tab-btn" data-tab-target="srt">Sous-titres<span class="soon-dot" title="Bientôt"></span></button>
+    <button type="button" class="tab-btn" data-tab-target="srt">Sous-titres</button>
     <button type="button" class="tab-btn" data-tab-target="strategie">Stratégie<span class="soon-dot" title="Bientôt"></span></button>
     <button type="button" class="tab-btn" data-tab-target="admin">🔒 Admin</button>
   </nav>
@@ -444,15 +444,10 @@
         <div class="tl-num">4</div>
         <div class="tl-body">
           <div class="tl-title">Règle le style (mode vidéo)</div>
-          <div class="tl-text">Police, taille, couleur et façon d'apparaître — aperçu en direct avant de lancer.</div>
+          <div class="tl-text">Police (15 choix), taille, couleur, position, contour/plaque, effet d'apparition, casse, et 6 modes d'apparition différents — aperçu en direct avant de lancer.</div>
         </div>
       </li>
     </ol>
-
-    <div class="tip-box">
-      <span class="tip-icon">⚠️</span>
-      Backend en cours de mise en place — l'interface est prête, le bouton « Go » sera actif dès que le service de rendu est branché.
-    </div>
   </aside>
 
   <section class="panel">
@@ -507,31 +502,117 @@
               <button type="button" class="preset-chip active" data-preset="custom">Personnalisé</button>
               <button type="button" class="preset-chip" data-preset="build-rond">Build rond (Toi &amp; Moi)</button>
               <button type="button" class="preset-chip" data-preset="replace-serif">Mot-à-mot serif (Bullet)</button>
-              <button type="button" class="preset-chip" data-preset="phrase-plate">Phrase claire</button>
+              <button type="button" class="preset-chip" data-preset="phrase-plate">Phrase claire, plaque</button>
+              <button type="button" class="preset-chip" data-preset="karaoke-punch">Karaoké punchy</button>
+              <button type="button" class="preset-chip" data-preset="manuscrite-pile">Manuscrite, pile</button>
             </div>
-            <div class="hint">Aperçus GIF réels à venir une fois le moteur de rendu branché — pour l'instant, aperçu texte en direct ci-dessous.</div>
+            <div class="hint">Un préréglage règle tout (typo, taille, couleur, mode) — modifie ensuite librement, ça repasse en « Personnalisé ».</div>
           </div>
 
           <div class="style-grid">
             <div class="style-controls">
-              <div class="field">
-                <label for="srt-font">Typo</label>
-                <select id="srt-font">
-                  <option value="'Poppins', sans-serif" data-weight="800">Poppins (gras rond)</option>
-                  <option value="'Playfair Display', serif" data-weight="700">Playfair Display (serif élégant)</option>
-                  <option value="'Space Grotesk', sans-serif" data-weight="700">Space Grotesk</option>
-                  <option value="'Inter', sans-serif" data-weight="500">Inter (fine)</option>
-                  <option value="'Bebas Neue', sans-serif" data-weight="400">Bebas Neue (condensé)</option>
-                </select>
+              <div class="field-row">
+                <div class="field">
+                  <label for="srt-font">Typo</label>
+                  <select id="srt-font">
+                    <optgroup label="Sans-serif">
+                      <option value="'Poppins', sans-serif" data-weight="800">Poppins (gras rond)</option>
+                      <option value="'Montserrat', sans-serif" data-weight="800">Montserrat</option>
+                      <option value="'Space Grotesk', sans-serif" data-weight="700">Space Grotesk</option>
+                      <option value="'Inter', sans-serif" data-weight="500">Inter (fine)</option>
+                    </optgroup>
+                    <optgroup label="Serif">
+                      <option value="'Playfair Display', serif" data-weight="700">Playfair Display (élégant)</option>
+                    </optgroup>
+                    <optgroup label="Condensé">
+                      <option value="'Bebas Neue', sans-serif" data-weight="400">Bebas Neue</option>
+                      <option value="'Anton', sans-serif" data-weight="400">Anton (ultra gras)</option>
+                      <option value="'Oswald', sans-serif" data-weight="700">Oswald</option>
+                      <option value="'Roboto Condensed', sans-serif" data-weight="700">Roboto Condensed</option>
+                    </optgroup>
+                    <optgroup label="Display / impact">
+                      <option value="'Archivo Black', sans-serif" data-weight="400">Archivo Black</option>
+                      <option value="'Bangers', sans-serif" data-weight="400">Bangers (comic)</option>
+                      <option value="'Righteous', sans-serif" data-weight="400">Righteous (rond)</option>
+                      <option value="'Luckiest Guy', sans-serif" data-weight="400">Luckiest Guy (bulle)</option>
+                    </optgroup>
+                    <optgroup label="Manuscrite">
+                      <option value="'Caveat', cursive" data-weight="700">Caveat</option>
+                      <option value="'Permanent Marker', cursive" data-weight="400">Permanent Marker</option>
+                    </optgroup>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="srt-size">Taille <span id="srt-sizeVal">10%</span></label>
+                  <input type="range" class="hslider" id="srt-size" min="4" max="22" step="1" value="10" />
+                </div>
               </div>
-              <div class="field">
-                <label for="srt-size">Taille <span id="srt-sizeVal">10%</span></label>
-                <input type="range" class="hslider" id="srt-size" min="4" max="22" step="1" value="10" />
+
+              <div class="field-row">
+                <div class="field">
+                  <label for="srt-color">Couleur du texte</label>
+                  <input type="color" id="srt-color" value="#ffffff" />
+                </div>
+                <div class="field">
+                  <label for="srt-case">Casse</label>
+                  <select id="srt-case">
+                    <option value="majuscule">MAJUSCULES</option>
+                    <option value="normal">Normale</option>
+                  </select>
+                </div>
               </div>
-              <div class="field">
-                <label for="srt-color">Couleur</label>
-                <input type="color" id="srt-color" value="#ffffff" />
+
+              <div class="field-row">
+                <div class="field">
+                  <label for="srt-position">Position à l'écran</label>
+                  <select id="srt-position">
+                    <option value="bas">Bas</option>
+                    <option value="centre" selected>Centre</option>
+                    <option value="haut">Haut</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="srt-effect">Effet d'apparition</label>
+                  <select id="srt-effect">
+                    <option value="none">Aucun (cut sec)</option>
+                    <option value="fade">Fondu</option>
+                    <option value="pop">Pop (petit zoom)</option>
+                    <option value="slide">Glissade</option>
+                  </select>
+                </div>
               </div>
+
+              <div class="field-row">
+                <div class="field">
+                  <label for="srt-fond">Fond derrière le texte</label>
+                  <select id="srt-fond">
+                    <option value="contour">Contour seul</option>
+                    <option value="plaque">Plaque colorée</option>
+                    <option value="aucun">Aucun (texte nu)</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="srt-outlineColor" id="srt-outlineLabel">Couleur du contour</label>
+                  <input type="color" id="srt-outlineColor" value="#000000" />
+                </div>
+              </div>
+
+              <div class="field-row">
+                <div class="field">
+                  <label for="srt-outlineWidth">Épaisseur du contour</label>
+                  <select id="srt-outlineWidth">
+                    <option value="fin">Fin</option>
+                    <option value="normal" selected>Normal</option>
+                    <option value="epais">Épais</option>
+                    <option value="aucun">Aucun</option>
+                  </select>
+                </div>
+                <div class="field" id="srt-accentField" style="display:none;">
+                  <label for="srt-accentColor">Couleur du mot en cours (karaoké)</label>
+                  <input type="color" id="srt-accentColor" value="#ffd400" />
+                </div>
+              </div>
+
               <div class="field">
                 <label>Mode d'apparition</label>
                 <div class="modes" id="srt-modeGroup">
@@ -539,10 +620,19 @@
                     <span class="mode-ico">◉</span><span>Mot remplace l'autre</span>
                   </button>
                   <button type="button" class="mode-btn" data-mode="build">
-                    <span class="mode-ico">▤</span><span>Ligne qui se construit</span>
+                    <span class="mode-ico">▤</span><span>Construction horizontale</span>
+                  </button>
+                  <button type="button" class="mode-btn" data-mode="build_vertical">
+                    <span class="mode-ico">⬇</span><span>Construction verticale</span>
+                  </button>
+                  <button type="button" class="mode-btn" data-mode="stack">
+                    <span class="mode-ico">☰</span><span>Pile qui défile</span>
                   </button>
                   <button type="button" class="mode-btn" data-mode="full">
                     <span class="mode-ico">▬</span><span>Phrase entière</span>
+                  </button>
+                  <button type="button" class="mode-btn" data-mode="karaoke">
+                    <span class="mode-ico">✓</span><span>Karaoké surligné</span>
                   </button>
                 </div>
               </div>

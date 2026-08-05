@@ -5,7 +5,15 @@ Deux usages, un seul moteur :
 - Option 1 "fichier" : upload audio (ou vidéo) -> .srt simple.
 - Option 2 "video"   : upload vidéo -> vidéo rendue, sous-titres stylés incrustés (.ass + ffmpeg burn-in).
 
-Etat v1 :
+Etat v2 (styles étendus) :
+- 6 modes d'apparition : mot remplace l'autre (replace), ligne qui se construit horizontalement
+  (build), ligne qui se construit verticalement (build_vertical), pile de lignes qui se déroule
+  (stack, "l'une au-dessus de l'autre"), phrase entière (full), karaoké mot surligné (karaoke).
+- Réglages : police (15 polices installées côté Docker), taille, couleur, position (bas/centre/haut),
+  effet d'apparition (fade/pop/slide), fond (contour/plaque/aucun) + couleur de contour, casse
+  (majuscule/normale), couleur d'accent (surlignage karaoké).
+- Anti-débordement : la taille de police est recalculée par cue (auto-fit) pour que les mots/lignes
+  longs ne sortent jamais du cadre, sans changer la taille demandée par l'utilisateur pour le reste.
 - Transcription : faster-whisper, modèle défini par la variable d'env WHISPER_MODEL (défaut "small" —
   voir docs/sous-titres.md pour l'arbitrage qualité/RAM selon le plan Render).
 - Cache "Lyrics Timing" : SQLite local (fichier dans DATA_DIR). Sur le plan Starter de Render le disque
@@ -202,8 +210,32 @@ def build_srt(words) -> str:
 
 
 # --------------------------------------------------------------------------
-# Génération .ass (Option 2) — 3 modes d'apparition
+# Génération .ass (Option 2) — 6 modes d'apparition, réglages étendus
 # --------------------------------------------------------------------------
+
+# Métadonnées par police : ratio largeur-caractère/taille (heuristique, pour l'auto-fit
+# qui empêche les mots longs de déborder du cadre) + casse par défaut la plus lisible.
+# Ces polices doivent être installées dans l'image Docker du backend (voir Dockerfile) —
+# sinon libass substitue une police par défaut et le rendu ne correspond plus au choix fait
+# côté front.
+FONT_META = {
+    "Poppins": {"ratio": 0.62, "allcaps": True, "category": "Sans"},
+    "Playfair Display": {"ratio": 0.60, "allcaps": True, "category": "Serif"},
+    "Bebas Neue": {"ratio": 0.42, "allcaps": True, "category": "Condensé"},
+    "Space Grotesk": {"ratio": 0.58, "allcaps": True, "category": "Sans"},
+    "Inter": {"ratio": 0.56, "allcaps": True, "category": "Sans"},
+    "Anton": {"ratio": 0.48, "allcaps": True, "category": "Condensé"},
+    "Oswald": {"ratio": 0.46, "allcaps": True, "category": "Condensé"},
+    "Caveat": {"ratio": 0.42, "allcaps": False, "category": "Manuscrite"},
+    "Montserrat": {"ratio": 0.58, "allcaps": True, "category": "Sans"},
+    "Archivo Black": {"ratio": 0.64, "allcaps": True, "category": "Display"},
+    "Bangers": {"ratio": 0.50, "allcaps": True, "category": "Display"},
+    "Righteous": {"ratio": 0.55, "allcaps": True, "category": "Display"},
+    "Roboto Condensed": {"ratio": 0.46, "allcaps": True, "category": "Condensé"},
+    "Luckiest Guy": {"ratio": 0.56, "allcaps": True, "category": "Display"},
+    "Permanent Marker": {"ratio": 0.52, "allcaps": False, "category": "Manuscrite"},
+}
+DEFAULT_FONT_META = {"ratio": 0.58, "allcaps": True, "category": "Sans"}
 
 
 def _ass_ts(t: float) -> str:
@@ -213,49 +245,49 @@ def _ass_ts(t: float) -> str:
     return f"{h:d}:{m:02d}:{s:05.2f}"
 
 
-def build_ass(words, mode: str, font: str, font_weight: str, size_pct: float, color_hex: str, video_h: int = 1920) -> str:
-    color_hex = color_hex.lstrip("#")
-    r, g, b = color_hex[0:2], color_hex[2:4], color_hex[4:6]
-    ass_color = f"&H00{b}{g}{r}"  # ASS = &HAABBGGRR, AA=00 -> opaque
-    font_size = max(10, int(video_h * (size_pct / 100.0)))
-    bold = -1 if int(font_weight) >= 700 else 0
-    font_clean = font.split(",")[0].strip().strip("'").strip('"')
+def _ass_color(hex_str: str) -> str:
+    h = (hex_str or "#ffffff").lstrip("#")
+    if len(h) != 6:
+        h = "ffffff"
+    r, g, b = h[0:2], h[2:4], h[4:6]
+    return f"&H00{b}{g}{r}"  # ASS = &HAABBGGRR, AA=00 -> opaque
 
-    header = (
-        "[Script Info]\n"
-        "ScriptType: v4.00+\n"
-        f"PlayResX: 1080\nPlayResY: {video_h}\n"
-        "[V4+ Styles]\n"
-        "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, Bold, "
-        "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV\n"
-        f"Style: Default,{font_clean},{font_size},{ass_color},&H00000000,{bold},1,2,1,5,60,60,120\n"
-        "[Events]\n"
-        "Format: Layer, Start, End, Style, Text\n"
-    )
 
-    lines = []
-    if mode == "full":
-        for w in words:
-            lines.append(f"Dialogue: 0,{_ass_ts(w['start'])},{_ass_ts(w['end'])},Default,{w['text']}")
-    elif mode == "replace":
-        for w in words:
-            lines.append(f"Dialogue: 0,{_ass_ts(w['start'])},{_ass_ts(w['end'])},Default,{w['text'].upper()}")
-    else:  # "build" — la ligne se construit mot après mot, reset tous les 3 mots
-        group = []
-        for i, w in enumerate(words):
-            group.append(w)
-            text = r"\N".join(_wrap_build_line(group))
-            # Chaque étape ne doit être visible que jusqu'à l'apparition du mot suivant —
-            # sinon les étapes successives se chevauchent et s'empilent à l'écran (bug vu au test).
-            start = w["start"]
-            end = words[i + 1]["start"] if i + 1 < len(words) else w["end"]
-            if end <= start:
-                end = w["end"]
-            lines.append(f"Dialogue: 0,{_ass_ts(start)},{_ass_ts(end)},Default,{text.upper()}")
-            if len(group) >= 3:
-                group = []
+def _fit_font_size(text_lines, base_size, ratio, avail_width, min_ratio=0.35):
+    """Réduit la taille de police pour ce cue précis si le mot/la ligne la plus longue
+    dépasserait la largeur du cadre — évite le clipping des mots longs (ex: TRANSCRIPTION)
+    sans toucher à la taille globale choisie par l'utilisateur pour les autres cues."""
+    longest = max((len(l) for l in text_lines), default=0)
+    if longest == 0:
+        return base_size
+    est_width = longest * base_size * ratio
+    if est_width <= avail_width:
+        return base_size
+    scaled = avail_width / (longest * ratio)
+    return max(int(base_size * min_ratio), int(scaled))
 
-    return header + "\n".join(lines) + "\n"
+
+def _position_anchor(position, video_h, marginv):
+    x = 540  # PlayResX / 2
+    if position == "bas":
+        y = video_h - marginv
+    elif position == "haut":
+        y = marginv
+    else:
+        y = video_h // 2
+    return x, y
+
+
+def _effect_tag(effect, duration_s, x, y):
+    """Tags ASS additionnels appliqués à un cue pour l'effet d'apparition choisi."""
+    if effect == "fade":
+        ms = max(60, min(220, int(duration_s * 1000 * 0.3)))
+        return f"\\fad({ms},{ms})"
+    if effect == "pop":
+        return "\\t(0,110,\\fscx116\\fscy116)\\t(110,200,\\fscx100\\fscy100)"
+    if effect == "slide":
+        return f"\\move({x},{y + 55},{x},{y},0,160)"
+    return ""
 
 
 def _wrap_build_line(group):
@@ -268,6 +300,160 @@ def _wrap_build_line(group):
     return [" ".join(words[:mid]), " ".join(words[mid:])]
 
 
+def build_ass(
+    words,
+    mode: str,
+    font: str,
+    font_weight: str,
+    size_pct: float,
+    color_hex: str,
+    video_h: int = 1920,
+    position: str = "centre",
+    effect: str = "none",
+    outline_color_hex: str = "#000000",
+    outline_width: str = "normal",
+    fond: str = "contour",
+    text_case: str = "majuscule",
+    accent_color_hex: str = "#ffd400",
+) -> str:
+    primary = _ass_color(color_hex)
+    outline_c = _ass_color(outline_color_hex)
+    accent = _ass_color(accent_color_hex)
+
+    font_clean = font.split(",")[0].strip().strip("'").strip('"')
+    meta = FONT_META.get(font_clean, DEFAULT_FONT_META)
+    ratio = meta["ratio"]
+
+    base_size = max(10, int(video_h * (size_pct / 100.0)))
+    bold = -1 if int(font_weight) >= 700 else 0
+
+    align = {"bas": 2, "haut": 8}.get(position, 5)
+    marginv = max(60, int(video_h * 0.06))
+    margin_lr = 36
+    avail_width = 1080 - (margin_lr * 2)
+
+    width_map = {"fin": 1, "normal": 2, "epais": 4, "aucun": 0}
+    outline_px = width_map.get(outline_width, 2)
+    border_style = 3 if fond == "plaque" else 1
+    if fond == "aucun":
+        outline_px = 0
+        shadow = 0
+    else:
+        shadow = 1 if border_style == 1 else 0
+    if border_style == 3:
+        outline_px = max(outline_px, 6)  # padding minimum autour du texte pour que la plaque soit lisible
+
+    back_colour = outline_c if border_style == 3 else "&HFF000000"
+
+    header = (
+        "[Script Info]\n"
+        "ScriptType: v4.00+\n"
+        f"PlayResX: 1080\nPlayResY: {video_h}\n"
+        "[V4+ Styles]\n"
+        "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, "
+        "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV\n"
+        f"Style: Default,{font_clean},{base_size},{primary},{outline_c},{back_colour},{bold},"
+        f"{border_style},{outline_px},{shadow},{align},{margin_lr},{margin_lr},{marginv}\n"
+        "[Events]\n"
+        "Format: Layer, Start, End, Style, Text\n"
+    )
+
+    x_anchor, y_anchor = _position_anchor(position, video_h, marginv)
+
+    def apply_case(s):
+        return s.upper() if text_case == "majuscule" else s
+
+    def cue(start, end, text_lines):
+        text = apply_case(r"\N".join(text_lines))
+        fit_size = _fit_font_size(text_lines, base_size, ratio, avail_width)
+        tags = f"\\fs{fit_size}" + _effect_tag(effect, max(end - start, 0.05), x_anchor, y_anchor)
+        return f"Dialogue: 0,{_ass_ts(start)},{_ass_ts(end)},Default,{{{tags}}}{text}"
+
+    def next_start(items, i, fallback_end):
+        end = items[i + 1]["start"] if i + 1 < len(items) else fallback_end
+        return end if end > items[i]["start"] else items[i]["end"]
+
+    lines = []
+
+    if mode == "full":
+        for w in words:
+            lines.append(cue(w["start"], w["end"], [w["text"]]))
+
+    elif mode == "replace":
+        for w in words:
+            lines.append(cue(w["start"], w["end"], [w["text"]]))
+
+    elif mode == "build_vertical":
+        # Chaque mot s'ajoute sur sa PROPRE ligne, empilé verticalement (reset tous les 3 mots).
+        group = []
+        for i, w in enumerate(words):
+            group.append(w)
+            end = next_start(words, i, w["end"])
+            lines.append(cue(w["start"], end, [x["text"] for x in group]))
+            if len(group) >= 3:
+                group = []
+
+    elif mode == "stack":
+        # "L'une au-dessus de l'autre" : pile déroulante des 3 dernières mini-lignes (2 mots
+        # chacune), la plus récente en bas, les précédentes remontent au-dessus.
+        chunks, cur = [], []
+        for w in words:
+            cur.append(w)
+            if len(cur) >= 2:
+                chunks.append(cur)
+                cur = []
+        if cur:
+            chunks.append(cur)
+        window = []
+        for ci, chunk in enumerate(chunks):
+            window.append(chunk)
+            if len(window) > 3:
+                window.pop(0)
+            start = chunk[0]["start"]
+            end = chunks[ci + 1][0]["start"] if ci + 1 < len(chunks) else chunk[-1]["end"]
+            if end <= start:
+                end = chunk[-1]["end"]
+            text_lines = [" ".join(x["text"] for x in c) for c in window]
+            lines.append(cue(start, end, text_lines))
+
+    elif mode == "karaoke":
+        # La ligne complète reste affichée, le mot en cours de lecture est surligné (couleur accent).
+        groups, cur = [], []
+        for w in words:
+            cur.append(w)
+            if len(cur) >= 5:
+                groups.append(cur)
+                cur = []
+        if cur:
+            groups.append(cur)
+        for group in groups:
+            plain_line = " ".join(apply_case(gw["text"]) for gw in group)
+            fit_size = _fit_font_size([plain_line], base_size, ratio, avail_width)
+            for i, w in enumerate(group):
+                start = w["start"]
+                end = group[i + 1]["start"] if i + 1 < len(group) else w["end"]
+                if end <= start:
+                    end = w["end"]
+                parts = []
+                for gw in group:
+                    t = apply_case(gw["text"])
+                    parts.append(f"{{\\c{accent}}}{t}{{\\c{primary}}}" if gw is w else t)
+                text = " ".join(parts)
+                tags = f"\\fs{fit_size}" + _effect_tag(effect, max(end - start, 0.05), x_anchor, y_anchor)
+                lines.append(f"Dialogue: 0,{_ass_ts(start)},{_ass_ts(end)},Default,{{{tags}}}{text}")
+
+    else:  # "build" (défaut) — la ligne se construit mot après mot, wrap sur 2 lignes max, reset tous les 3 mots
+        group = []
+        for i, w in enumerate(words):
+            group.append(w)
+            end = next_start(words, i, w["end"])
+            lines.append(cue(w["start"], end, _wrap_build_line(group)))
+            if len(group) >= 3:
+                group = []
+
+    return header + "\n".join(lines) + "\n"
+
+
 # --------------------------------------------------------------------------
 # Traitement du job (thread d'arrière-plan)
 # --------------------------------------------------------------------------
@@ -277,7 +463,11 @@ def run(cmd):
     subprocess.run(cmd, check=True, capture_output=True)
 
 
-def process_job(job_id, option, artiste, titre, upload_path: Path, font, font_weight, size_pct, color, mode):
+def process_job(
+    job_id, option, artiste, titre, upload_path: Path, font, font_weight, size_pct, color, mode,
+    position="centre", effect="none", outline_color="#000000", outline_width="normal",
+    fond="contour", text_case="majuscule", accent_color="#ffd400",
+):
     try:
         granularity = "mot" if (option == "video" and mode != "full") else "phrase"
         single_cle = slugify_key(artiste, titre)
@@ -315,7 +505,12 @@ def process_job(job_id, option, artiste, titre, upload_path: Path, font, font_we
 
         ass_path = DATA_DIR / f"{job_id}.ass"
         ass_path.write_text(
-            build_ass(words, mode, font, font_weight, float(size_pct), color, video_h),
+            build_ass(
+                words, mode, font, font_weight, float(size_pct), color, video_h,
+                position=position, effect=effect, outline_color_hex=outline_color,
+                outline_width=outline_width, fond=fond, text_case=text_case,
+                accent_color_hex=accent_color,
+            ),
             encoding="utf-8",
         )
         update_job(job_id, step_ass=1, current_label="Style appliqué")
@@ -364,6 +559,13 @@ async def create_job(
     size_pct: str = Form("10"),
     color: str = Form("#ffffff"),
     mode: str = Form("replace"),
+    position: str = Form("centre"),
+    effect: str = Form("none"),
+    outline_color: str = Form("#000000"),
+    outline_width: str = Form("normal"),
+    fond: str = Form("contour"),
+    text_case: str = Form("majuscule"),
+    accent_color: str = Form("#ffd400"),
     file: UploadFile = File(...),
 ):
     conn = db()
@@ -382,6 +584,10 @@ async def create_job(
     threading.Thread(
         target=process_job,
         args=(job_id, option, artiste, titre, upload_path, font, font_weight, size_pct, color, mode),
+        kwargs=dict(
+            position=position, effect=effect, outline_color=outline_color,
+            outline_width=outline_width, fond=fond, text_case=text_case, accent_color=accent_color,
+        ),
         daemon=True,
     ).start()
 

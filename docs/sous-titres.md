@@ -64,19 +64,23 @@ Une ligne par (single, granularité) — générée à la demande la première f
 
 ## 4. Système de styles — contrôles précis + préréglages
 
-Décision : pas seulement une bibliothèque de styles figés. L'utilisateur doit pouvoir régler précisément, indépendamment les uns des autres :
+Décision : pas seulement une bibliothèque de styles figés. L'utilisateur peut régler précisément, indépendamment les uns des autres :
 
-- **Police** (sélecteur de typo)
-- **Taille de la police** (en % de la hauteur vidéo — s'adapte à tous les formats)
-- **Couleur de la police**
-- **Mode d'apparition / mise en page** — 3 modes de base pour cette v1 :
-  1. **Mot unique remplace l'autre, big, centré** — un mot (ou très court groupe) affiché à la fois, chaque nouveau mot remplace entièrement le précédent.
-  2. **Phrase qui se construit mot après mot** — les mots s'ajoutent un par un dans la ligne ("IL" → "IL REMET" → "IL REMET RENDEZ-VOUS"), retour à la ligne automatique, puis la ligne se vide et la suivante démarre. Logique déjà codée dans le skill `srt-linebuild` (export "Line build preview") — réutilisable telle quelle pour ce mode.
-  3. **Phrase entière affichée d'un coup** — sous-titrage classique, une ligne/phrase = un seul cue statique du début à la fin de la ligne.
+- **Police** — 15 polices installées côté backend (Docker : téléchargées + `fc-cache` au build), réparties en 5 familles : sans-serif (Poppins, Montserrat, Space Grotesk, Inter), serif (Playfair Display), condensé (Bebas Neue, Anton, Oswald, Roboto Condensed), display/impact (Archivo Black, Bangers, Righteous, Luckiest Guy), manuscrite (Caveat, Permanent Marker). Voir `FONT_META` dans `backend/main.py`.
+- **Taille de la police** (en % de la hauteur vidéo — s'adapte à tous les formats), avec **auto-fit anti-débordement** : la taille effective est recalculée par cue si le mot/la ligne la plus longue dépasserait le cadre, sans changer la taille globale demandée pour le reste (`_fit_font_size`).
+- **Couleur du texte**, **casse** (MAJUSCULES ou normale — utile pour les polices manuscrites).
+- **Position à l'écran** (bas / centre / haut).
+- **Fond derrière le texte** : contour seul, plaque colorée (BorderStyle=3), ou texte nu — avec couleur et épaisseur de contour réglables.
+- **Effet d'apparition** : aucun, fondu, pop (petit zoom), glissade — via tags ASS (`\fad`, `\t` sur `\fscx/\fscy`, `\move`).
+- **Mode d'apparition / mise en page** — 6 modes :
+  1. **Mot remplace l'autre** — un mot à la fois, big, centré.
+  2. **Construction horizontale** — les mots s'ajoutent dans la ligne, wrap sur 2 lignes max, reset tous les 3 mots.
+  3. **Construction verticale** — chaque mot sur sa propre ligne, empilé verticalement, reset tous les 3 mots.
+  4. **Pile qui défile** ("l'une au-dessus de l'autre") — fenêtre glissante des 3 dernières mini-lignes (2 mots chacune), la plus récente en bas.
+  5. **Phrase entière** — sous-titrage classique, un segment = un cue statique.
+  6. **Karaoké** — la ligne complète reste affichée, le mot en cours de lecture est surligné dans une couleur d'accent dédiée.
 
-"Plus tard, plus précis" (noté pour itération future, pas construit dans cette v1) : position (bas/centre/haut), contour/ombre, transitions d'apparition (fade/pop/slide), nombre de mots groupés en mode 1, highlight du mot actif façon karaoké en mode 3.
-
-Un style = un objet JSON {police, taille, couleur, mode} — indépendant du code, stocké et réutilisable, sert à la fois à écrire le .ass (Option 2 uniquement, voir §0bis) et à construire les préréglages du menu déroulant.
+Un style = un objet {police, taille, couleur, casse, position, fond, contour, effet, mode, couleur d'accent} — indépendant du code, envoyé tel quel au backend (`POST /jobs`), sert à la fois à écrire le `.ass` (Option 2 uniquement, voir §0bis) et à construire les préréglages du menu déroulant (5 préréglages actuellement, `PRESETS` dans `js/subtitles.js`).
 
 ### 4bis. Vérification sur le catalogue existant
 
@@ -90,32 +94,24 @@ Les 3 modes ci-dessus ne sont pas théoriques — les 2 premiers sont déjà uti
 
 ## 5. État d'avancement
 
-### Fait
+### Fait — en production
 
-L'onglet "Sous-titres" est construit dans `index.html` / `css/style.css` / `js/subtitles.js` :
-
-- Bascule Option 1 (fichier) / Option 2 (vidéo) avec dropzone drag & drop.
+- Backend FastAPI + faster-whisper + ffmpeg déployé sur Render (Docker Web Service), `https://duchess-hub.onrender.com`, plan Pro. Frontend sur Render Static Site, `https://duchess-hub-front.onrender.com`.
+- Les deux options fonctionnent en bout en bout (testées en direct) : Option 1 (fichier → `.srt`) et Option 2 (vidéo → vidéo incrustée, `.ass` + burn-in ffmpeg).
+- Système de styles v2 complet (§4) : 15 polices, taille avec auto-fit anti-débordement, couleur, casse, position, fond (contour/plaque/aucun), effet d'apparition, 6 modes, couleur d'accent karaoké. 5 préréglages rapides.
+- Aperçu texte en direct dans `js/subtitles.js` — reproduit fidèlement la logique du backend (mêmes découpages par mode, même heuristique d'auto-fit, même surlignage karaoké), avec animation CSS pour les effets d'apparition.
+- Cache "Lyrics Timing" (SQLite) : réutilise les paroles déjà timées pour un single déjà traité ailleurs sur le hub.
 - Champs single (artiste/titre) branchés sur la synchronisation existante du hub (`js/shared.js`).
-- Réglages police / taille / couleur / mode d'apparition (3 modes), avec préréglages rapides basés sur les styles repérés dans le catalogue.
-- Aperçu texte en direct (proxy en attendant le vrai moteur de rendu — anime les 3 modes sur un exemple réel des paroles de "Toi & Moi").
-- Scaffold d'envoi + polling de statut, identique au pattern déjà utilisé sur les onglets Pitch/TikTok.
-
-Rien de tout ça n'est encore branché à un vrai backend — le bouton Go affiche un message clair ("backend pas encore branché") tant que `BACKEND_BASE_URL` dans `js/subtitles.js` n'est pas renseignée avec l'URL Render réelle.
 
 ### Reste à faire
 
-1. Backend Render (upload, transcription faster-whisper, génération ASS/SRT, burn-in ffmpeg, statut de job) — voir `docs/backend-render.md` une fois créé.
-2. Clé API Flowstage branchée côté backend.
-3. Table "Lyrics Timing" (Postgres Render) + logique de cache par single.
-4. Remplacement de `BACKEND_BASE_URL` dans `js/subtitles.js` par l'URL Render réelle.
-5. Test end-to-end sur 2-3 singles réels.
-
-### Render : quel plan
-
-Le Starter (7 $/mois, 512 Mo RAM / 0,5 CPU) est correct pour démarrer mais trop juste pour le modèle faster-whisper large-v3 utilisé en local (~2-3 Go nécessaires). Départ recommandé : Starter + modèle whisper allégé, upgrade vers Standard (25 $/mois, 2 Go RAM) seulement si la qualité/vitesse testée sur un vrai single ne suffit pas.
+1. Clé API Flowstage branchée côté backend (pour aller chercher l'audio maître au lieu de transcrire l'upload).
+2. Stockage persistant pour le cache "Lyrics Timing" — SQLite actuel n'est pas persistant entre redéploiements sur le plan Render en cours (disque non persistant) : Postgres Render ou disque persistant à évaluer si le volume le justifie.
+3. Vérifier si `WEB_CONCURRENCY=2` (2 process uvicorn observés sur le plan Pro) charge le modèle whisper deux fois (un singleton par process) — pas encore confirmé comme un problème, fix potentiel : forcer `--workers 1` dans le `CMD` du Dockerfile.
+4. Test end-to-end sur plusieurs singles réels avec les nouveaux modes/effets (fait en local via rendu ffmpeg synthétique — reste à valider sur de la vraie vidéo/voix).
 
 ## 6. Points encore ouverts
 
 - Formats vidéo à supporter en entrée (9:16 uniquement, ou aussi 16:9 / 1:1) — impacte le calcul de taille de police en %.
-- Limite de poids/durée d'upload (contrainte d'hébergement du backend).
-- Nom d'affichage définitif de l'onglet fusionné sur le hub ("Sous-titres" tout court ?).
+- Limite de poids/durée d'upload (contrainte du plan Render en cours).
+- Karaoké et pile qui défile groupent les mots par paquets fixes (5 mots / 2 mots) plutôt que par vraie coupure de phrase — pourrait être affiné avec la ponctuation détectée par whisper.

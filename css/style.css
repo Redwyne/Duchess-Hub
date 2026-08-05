@@ -463,14 +463,15 @@ textarea { resize: vertical; min-height: 76px; }
   grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
+@media (max-width: 560px) { .modes { grid-template-columns: repeat(2, 1fr); } }
 
 .mode-btn {
   background: #0d0d11;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 16px 10px;
+  padding: 14px 8px;
   color: var(--muted);
-  font-size: 13.5px;
+  font-size: 12.5px;
   font-weight: 500;
   cursor: pointer;
   font-family: inherit;
@@ -478,6 +479,8 @@ textarea { resize: vertical; min-height: 76px; }
   flex-direction: column;
   align-items: center;
   gap: 8px;
+  text-align: center;
+  line-height: 1.25;
   transition: all .15s;
 }
 .mode-ico { font-size: 16px; opacity: .6; transition: opacity .15s; }
@@ -1130,6 +1133,16 @@ input[type="color"] {
   line-height: 1.15;
   text-shadow: 0 2px 10px rgba(0,0,0,.5), 0 0 1px rgba(0,0,0,.8);
   word-break: break-word;
+  max-width: 100%;
 }
 
 .preview-caption { font-size: 11px; color: var(--muted-2); text-align: center; }
+
+/* Effets d'apparition — aperçu uniquement (le rendu réel utilise les tags ASS équivalents,
+   voir _effect_tag() côté backend/main.py). */
+@keyframes previewFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes previewPop { 0% { transform: scale(.85); } 60% { transform: scale(1.08); } 100% { transform: scale(1); } }
+@keyframes previewSlide { from { transform: translateY(14px); opacity: .2; } to { transform: translateY(0); opacity: 1; } }
+.anim-fade { animation: previewFade .25s ease both; }
+.anim-pop { animation: previewPop .28s cubic-bezier(.34,1.56,.64,1) both; }
+.anim-slide { animation: previewSlide .22s ease both; }
