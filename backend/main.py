@@ -47,7 +47,8 @@ DB_PATH = DATA_DIR / "app.db"
 
 # Origines autorisées à appeler ce backend depuis le navigateur.
 ALLOWED_ORIGINS = [
-    "https://duchess-hub.netlify.app",
+    "https://duchess-hub-front.onrender.com",
+    "https://duchess-hub.netlify.app",  # ancien hébergement, gardé au cas où
     "http://localhost:8888",
     "http://127.0.0.1:8888",
 ]
