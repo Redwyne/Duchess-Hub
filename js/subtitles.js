@@ -1,10 +1,7 @@
 (function () {
   "use strict";
 
-  // TODO Michel : remplacer par l'URL du backend une fois déployé sur Render
-  // (endpoints attendus : POST {BASE}/jobs  →  {job_id}
-  //                        GET  {BASE}/jobs/{job_id}  →  {step_*: bool, download_url, error_message})
-  const BACKEND_BASE_URL = "https://REMPLACE-MOI.onrender.com";
+  const BACKEND_BASE_URL = "https://duchess-hub.onrender.com";
   const POLL_INTERVAL_MS = 1500;
   const POLL_TIMEOUT_MS = 240000; // 4 min (transcription + rendu vidéo peut prendre du temps)
 
