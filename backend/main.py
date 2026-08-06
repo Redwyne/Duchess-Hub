@@ -43,7 +43,7 @@ import unicodedata
 import uuid
 from pathlib import Path
 
-from typing import List
+from typing import List, Optional
 
 import requests
 from fastapi import Body, Depends, FastAPI, Form, Header, HTTPException, UploadFile, File
@@ -51,6 +51,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+import budget_engine as be
 
 # --------------------------------------------------------------------------
 # Config
@@ -162,6 +164,17 @@ MAKE_INVENTAIRE_URLS = {
     "update": os.environ.get("MAKE_INVENTAIRE_UPDATE_URL", ""),
     "delete": os.environ.get("MAKE_INVENTAIRE_DELETE_URL", ""),
 }
+
+# Budgets artistes — 3 scénarios Make génériques (fichier entier, pas ligne par ligne, voir
+# backend/budget_engine.py pour le pourquoi) : LIST (fichiers du dossier SharePoint dédié),
+# DOWNLOAD (contenu binaire brut d'un fichier par itemId), UPLOAD (dépôt binaire multipart,
+# conflictBehavior=replace -> upsert par nom de fichier dans ce même dossier).
+MAKE_BUDGET_URLS = {
+    "list": os.environ.get("MAKE_BUDGET_LIST_URL", ""),
+    "download": os.environ.get("MAKE_BUDGET_DOWNLOAD_URL", ""),
+    "upload": os.environ.get("MAKE_BUDGET_UPLOAD_URL", ""),
+}
+BUDGET_LOGO_PATH = APP_DIR.parent / "assets" / "logo-white-bg.png"
 
 # Analyse photo IA (préremplissage du formulaire d'ajout d'inventaire) — clé
 # API Anthropic à définir sur Render (Dashboard > service backend > Environment).
@@ -503,7 +516,7 @@ def _merge_apostrophe_words(words):
     return merged
 
 
-def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artiste: str = "", titre: str = ""):
+def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artiste: str = "", titre: str = "", reference_lyrics: str = ""):
     """Source des paroles timées, par ordre de préférence :
     1. Cache local (déjà généré une fois, peu importe la source d'origine).
     2. Flowstage (paroles vérifiées manuellement, bien plus fiables qu'une transcription
@@ -513,6 +526,14 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
     3. Repli : transcription faster-whisper de l'audio uploadé, puis passée à
        _apply_claude_correction() si ANTHROPIC_API_KEY est configurée (corrige les homophones
        classiques du français sans jamais toucher au style/argot volontaire).
+
+    `reference_lyrics` (optionnel) : vraies paroles collées par l'utilisateur — voir
+    correct_lyrics_with_claude(). Testé en direct : rattrape des erreurs qu'aucun réglage whisper
+    ni correction grammaticale seule ne peut deviner (mot entier mal entendu, "il" à la place de
+    "elle"...). Un plafond de qualité a été confirmé empiriquement : passer whisper de "medium" à
+    "large-v3" et/ou activer `vad_filter` n'améliore PAS la transcription sur l'audio ARK réel
+    (voix + instru chargée) — `vad_filter=True` a même dégradé un test réel (26s de paroles
+    réduites à une seule ligne bâclée). Le vrai levier quand l'écart persiste, c'est ce paramètre.
 
     Renvoie un tuple (words, source) — `source` sert uniquement au diagnostic (exposé via
     `lyrics_source` dans /jobs/{job_id}, voir process_job) pour savoir sans deviner par quel
@@ -531,9 +552,13 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
         # de correction qui avait échoué à l'époque) est retentée maintenant si une clé Anthropic
         # est disponible, au lieu de servir indéfiniment le même texte non corrigé. Sans ça, un
         # single déjà transcrit une fois avant ce fix restait bloqué en whisper brut pour toujours,
-        # même après un redéploiement avec la correction Claude qui fonctionne.
-        if source == "audio_uploade" and ANTHROPIC_API_KEY:
-            corrected = _apply_claude_correction(words, granularity, artiste, titre)
+        # même après un redéploiement avec la correction Claude qui fonctionne. Un bloc de
+        # référence nouvellement fourni redéclenche aussi la correction même si une passe
+        # grammaticale seule avait déjà tourné ("audio_uploade_corrige_claude") — la référence
+        # peut rattraper des erreurs que la grammaire seule ne pouvait pas voir.
+        needs_retry = source == "audio_uploade" or (source == "audio_uploade_corrige_claude" and reference_lyrics.strip())
+        if needs_retry and ANTHROPIC_API_KEY:
+            corrected = _apply_claude_correction(words, granularity, artiste, titre, reference_lyrics)
             if corrected:
                 words = corrected
                 source = "audio_uploade_corrige_claude"
@@ -553,7 +578,7 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
     words = transcribe(audio_path, granularity)
     words = _merge_apostrophe_words(words)
     source = "audio_uploade"
-    corrected = _apply_claude_correction(words, granularity, artiste, titre)
+    corrected = _apply_claude_correction(words, granularity, artiste, titre, reference_lyrics)
     if corrected:
         words = corrected
         source = "audio_uploade_corrige_claude"
@@ -584,14 +609,25 @@ def _words_to_phrases(words, gap_threshold: float = 0.4):
     ]
 
 
-def correct_lyrics_with_claude(phrases, artiste: str = "", titre: str = ""):
+def correct_lyrics_with_claude(phrases, artiste: str = "", titre: str = "", reference_lyrics: str = ""):
     """Corrige les fautes de transcription whisper (homophones classiques du français —
     "il s'aime"/"ils s'aiment", "ces"/"ses"/"c'est"...) via l'API Claude, ligne par ligne, avec
     tout le contexte du morceau dans le même appel. Ne touche volontairement PAS au style : les
     lyrics ARK sont urbaines/argot, le langage familier est intentionnel et doit rester tel quel
     — seule une vraie erreur de transcription doit être corrigée. Renvoie None (repli silencieux
     sur le texte whisper d'origine, jamais bloquant) si la clé n'est pas configurée, si l'appel
-    échoue, ou si Claude ne renvoie pas exactement le même nombre de lignes qu'en entrée."""
+    échoue, ou si Claude ne renvoie pas exactement le même nombre de lignes qu'en entrée.
+
+    `reference_lyrics` (optionnel) : bloc de texte fourni par l'utilisateur avec les VRAIES
+    paroles du morceau (ou d'un extrait plus large) — quand fourni, Claude aligne en priorité
+    chaque ligne transcrite sur la ligne de référence correspondante quand il est raisonnablement
+    sûr qu'elles correspondent, ce qui rattrape des erreurs qu'une correction purement
+    grammaticale ne peut pas deviner (mot entier mal entendu, confusion il/elle non homophone,
+    etc.) — testé en direct : la correction seule ratait "il remet" au lieu de "elle remet" et
+    "et le matin" au lieu de "dès le matin" (aucune des deux n'est une simple faute d'accord),
+    la version avec référence corrige les deux. Les lignes transcrites qui ne correspondent à
+    aucune ligne de la référence (partie du morceau non couverte par l'extrait fourni) retombent
+    sur la correction grammaticale habituelle, jamais sur une invention."""
     if not ANTHROPIC_API_KEY or not phrases:
         return None
     try:
@@ -633,6 +669,27 @@ def correct_lyrics_with_claude(phrases, artiste: str = "", titre: str = ""):
             "(bon sens grammatical), ou renvoie-la identique si tu n'es pas sûr — mais renvoie "
             "TOUJOURS exactement une ligne corrigée par ligne reçue, jamais une question, "
             "jamais un refus.\n\n"
+        )
+        if reference_lyrics.strip():
+            prompt += (
+                "Voici aussi, séparément, les VRAIES paroles de ce morceau (ou d'un extrait plus "
+                "large de ce morceau), fournies par l'utilisateur — à traiter comme la source de "
+                "vérité ABSOLUE quand une ligne transcrite correspond à l'une d'elles, prioritaire "
+                "sur toute autre règle de correction ci-dessus :\n\n"
+                f"{reference_lyrics.strip()}\n\n"
+                "Pour CHAQUE ligne transcrite numérotée : si tu es raisonnablement sûr qu'elle "
+                "correspond à une ligne des vraies paroles (même approximativement — refrain "
+                "répété plusieurs fois, ordre des mots légèrement différent à cause du "
+                "découpage whisper, etc.), remplace-la par le texte EXACT de la vraie ligne "
+                "correspondante, même si la différence n'est pas une simple faute d'accord "
+                "(mot entier mal entendu, pronom différent, ordre des mots...). Si une ligne "
+                "transcrite ne correspond à AUCUNE ligne des vraies paroles fournies "
+                "(probablement une partie du morceau non couverte par cet extrait de "
+                "référence), applique seulement les règles de correction grammaticale "
+                "habituelles ci-dessus — n'invente jamais une ligne de référence qui n'existe "
+                "pas dans le bloc fourni.\n\n"
+            )
+        prompt += (
             "Renvoie EXACTEMENT le même nombre de lignes, dans le même ordre, numérotées "
             "pareil, sans aucun commentaire ni explication avant/après — juste les lignes, "
             "corrigées ou identiques si rien à corriger.\n\n"
@@ -675,7 +732,7 @@ def correct_lyrics_with_claude(phrases, artiste: str = "", titre: str = ""):
         return None
 
 
-def _apply_claude_correction(words, granularity: str, artiste: str = "", titre: str = ""):
+def _apply_claude_correction(words, granularity: str, artiste: str = "", titre: str = "", reference_lyrics: str = ""):
     """Applique correct_lyrics_with_claude() sur une liste de mots OU de phrases (selon
     `granularity`) et reconstruit le même format en sortie. Pour la granularité "mot", le
     timing mot par mot est ré-interpolé à partir des lignes corrigées — exactement la même
@@ -686,7 +743,7 @@ def _apply_claude_correction(words, granularity: str, artiste: str = "", titre: 
     phrases = words if granularity == "phrase" else _words_to_phrases(words)
     if not phrases:
         return None
-    corrected_texts = correct_lyrics_with_claude(phrases, artiste, titre)
+    corrected_texts = correct_lyrics_with_claude(phrases, artiste, titre, reference_lyrics)
     if not corrected_texts:
         return None
     corrected_phrases = [
@@ -991,7 +1048,7 @@ def process_job(
     job_id, option, artiste, titre, upload_path: Path, font, font_weight, size_pct, color, mode,
     position="centre", effect="none", outline_color="#000000", outline_width="normal",
     fond="contour", text_case="majuscule", accent_color="#ffd400", italic=False, words_per_group=3,
-    edited_words="",
+    edited_words="", reference_lyrics="",
 ):
     try:
         if option == "preview":
@@ -1021,7 +1078,10 @@ def process_job(
             lyrics_source = "verifie_manuellement"
             _cache_timing(single_cle, granularity, words, lyrics_source)
         else:
-            words, lyrics_source = get_or_transcribe(single_cle, granularity, audio_path, artiste=artiste, titre=titre)
+            words, lyrics_source = get_or_transcribe(
+                single_cle, granularity, audio_path, artiste=artiste, titre=titre,
+                reference_lyrics=reference_lyrics,
+            )
         update_job(job_id, step_lyrics=1, current_label="Paroles timées")
 
         if not words:
@@ -1173,6 +1233,7 @@ async def create_job(
     italic: str = Form("false"),
     words_per_group: str = Form("3"),
     edited_words: str = Form(""),
+    reference_lyrics: str = Form(""),
     file: UploadFile = File(...),
 ):
     conn = db()
@@ -1195,7 +1256,7 @@ async def create_job(
             position=position, effect=effect, outline_color=outline_color,
             outline_width=outline_width, fond=fond, text_case=text_case, accent_color=accent_color,
             italic=str(italic).lower() in ("1", "true", "on", "yes"), words_per_group=words_per_group,
-            edited_words=edited_words,
+            edited_words=edited_words, reference_lyrics=reference_lyrics,
         ),
         daemon=True,
     ).start()
@@ -1427,3 +1488,193 @@ async def admin_inventaire(action: str, payload: dict = Body(default={}), _ok: b
     except ValueError:
         data = {"raw": r.text}
     return JSONResponse(data, status_code=r.status_code if r.status_code < 500 else 502)
+
+
+# --------------------------------------------------------------------------
+# Onglet Admin — Budgets artistes
+# --------------------------------------------------------------------------
+# 1 fichier Excel par artiste (dans le dossier SharePoint dédié aux budgets),
+# 1 feuillet par projet (EP/LP/single). Toute la logique de structure/calcul
+# vit dans budget_engine.py — ce backend ne fait que : télécharger le fichier
+# entier via Make (binaire brut), le modifier avec budget_engine, le renvoyer
+# entier via Make (upsert par nom de fichier). Voir le docstring de
+# budget_engine.py pour le détail du modèle de données.
+
+ARTIST_FILE_PREFIX = "DUCHESS_Budget_"
+_UNSAFE_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|]')
+
+
+def _artist_filename(artist: str) -> str:
+    safe = _UNSAFE_FILENAME_CHARS.sub("", (artist or "").strip()) or "SansNom"
+    return f"{ARTIST_FILE_PREFIX}{safe}.xlsx"
+
+
+def _artist_from_filename(filename: str) -> str:
+    name = filename or ""
+    if name.startswith(ARTIST_FILE_PREFIX):
+        name = name[len(ARTIST_FILE_PREFIX):]
+    return re.sub(r"\.xlsx?$", "", name, flags=re.IGNORECASE)
+
+
+def _budget_list_files() -> list:
+    if not MAKE_BUDGET_URLS["list"]:
+        raise HTTPException(status_code=500, detail="MAKE_BUDGET_LIST_URL n'est pas configurée côté serveur (Render > Environment).")
+    try:
+        r = requests.post(MAKE_BUDGET_URLS["list"], json={}, timeout=25)
+        r.raise_for_status()
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Erreur de connexion à Make (liste budgets) : {e}")
+    try:
+        files = r.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Réponse Make illisible (liste budgets).")
+    return [f for f in files if isinstance(f, dict) and f.get("id")]
+
+
+def _budget_download(item_id: str) -> bytes:
+    if not MAKE_BUDGET_URLS["download"]:
+        raise HTTPException(status_code=500, detail="MAKE_BUDGET_DOWNLOAD_URL n'est pas configurée côté serveur (Render > Environment).")
+    try:
+        r = requests.post(MAKE_BUDGET_URLS["download"], json={"itemId": item_id}, timeout=40)
+        r.raise_for_status()
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Erreur de connexion à Make (téléchargement budget) : {e}")
+    if not r.content:
+        raise HTTPException(status_code=502, detail="Fichier budget vide reçu de Make — itemId invalide ?")
+    return r.content
+
+
+def _budget_upload(filename: str, data: bytes) -> dict:
+    if not MAKE_BUDGET_URLS["upload"]:
+        raise HTTPException(status_code=500, detail="MAKE_BUDGET_UPLOAD_URL n'est pas configurée côté serveur (Render > Environment).")
+    try:
+        r = requests.post(
+            MAKE_BUDGET_URLS["upload"],
+            files={"file": (filename, data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            timeout=60,
+        )
+        r.raise_for_status()
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Erreur de connexion à Make (envoi budget) : {e}")
+    try:
+        return r.json()
+    except ValueError:
+        return {"raw": r.text}
+
+
+def _budget_logo_path() -> Optional[str]:
+    return str(BUDGET_LOGO_PATH) if BUDGET_LOGO_PATH.exists() else None
+
+
+@app.get("/admin/budget/artists")
+async def budget_artists(_ok: bool = Depends(require_admin)):
+    files = _budget_list_files()
+    return {
+        "artists": [
+            {
+                "fileId": f["id"],
+                "fileName": f.get("name"),
+                "artist": _artist_from_filename(f.get("name") or ""),
+                "size": f.get("size"),
+                "lastModified": f.get("lastModifiedDateTime"),
+                "webUrl": f.get("webUrl"),
+            }
+            for f in files
+        ],
+        "categories": be.CATEGORIES,
+        "categoryPresets": be.CATEGORY_PRESETS,
+        "simpleCategories": sorted(be.SIMPLE_CATEGORIES),
+    }
+
+
+@app.get("/admin/budget/file/{file_id}/projects")
+async def budget_projects(file_id: str, _ok: bool = Depends(require_admin)):
+    data = _budget_download(file_id)
+    wb = be.workbook_from_bytes(data)
+    return {"projects": wb.sheetnames}
+
+
+@app.get("/admin/budget/file/{file_id}/projects/{sheet_name}")
+async def budget_project_tree(file_id: str, sheet_name: str, _ok: bool = Depends(require_admin)):
+    data = _budget_download(file_id)
+    try:
+        tree = be.read_project_tree(data, sheet_name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Projet '{sheet_name}' introuvable dans ce fichier.")
+    return tree
+
+
+class BudgetSaveBody(BaseModel):
+    file_name: str
+    artist: str
+    project_label: str
+    tree: dict
+
+
+@app.put("/admin/budget/file/{file_id}/projects/{sheet_name}")
+async def budget_save_project(file_id: str, sheet_name: str, body: BudgetSaveBody, _ok: bool = Depends(require_admin)):
+    data = _budget_download(file_id)
+    new_data = be.write_project_tree(
+        data, sheet_name, body.artist, body.project_label, body.tree, logo_path=_budget_logo_path(),
+    )
+    upload_result = _budget_upload(body.file_name, new_data)
+    tree = be.read_project_tree(new_data, sheet_name)
+    return {"saved": True, "upload": upload_result, **tree}
+
+
+class BudgetNewArtistBody(BaseModel):
+    artist: str
+    project_label: str = "Projet 1"
+
+
+@app.post("/admin/budget/new-artist")
+async def budget_new_artist(body: BudgetNewArtistBody, _ok: bool = Depends(require_admin)):
+    artist = (body.artist or "").strip()
+    if not artist:
+        raise HTTPException(status_code=400, detail="Nom d'artiste requis.")
+    filename = _artist_filename(artist)
+    existing = {f.get("name") for f in _budget_list_files()}
+    if filename in existing:
+        raise HTTPException(status_code=409, detail=f"Un fichier budget existe déjà pour « {artist} ».")
+    wb = be.new_artist_workbook(artist, body.project_label or "Projet 1", logo_path=_budget_logo_path())
+    data = be.workbook_to_bytes(wb)
+    result = _budget_upload(filename, data)
+    return {"created": True, "fileName": filename, "fileId": result.get("id"), "artist": artist}
+
+
+class BudgetNewProjectBody(BaseModel):
+    file_name: str
+    artist: str
+    project_label: str
+
+
+@app.post("/admin/budget/file/{file_id}/new-project")
+async def budget_new_project(file_id: str, body: BudgetNewProjectBody, _ok: bool = Depends(require_admin)):
+    data = _budget_download(file_id)
+    wb = be.workbook_from_bytes(data)
+    sheet_name = (body.project_label or "Projet").strip()[:31]
+    if not sheet_name:
+        raise HTTPException(status_code=400, detail="Nom de projet requis.")
+    if sheet_name in wb.sheetnames:
+        raise HTTPException(status_code=409, detail=f"Un projet « {sheet_name} » existe déjà pour cet artiste.")
+    be.new_project_sheet(wb, sheet_name, body.artist, body.project_label, logo_path=_budget_logo_path())
+    new_data = be.workbook_to_bytes(wb)
+    upload_result = _budget_upload(body.file_name, new_data)
+    return {"created": True, "projects": wb.sheetnames, "upload": upload_result}
+
+
+@app.delete("/admin/budget/file/{file_id}/projects/{sheet_name}")
+async def budget_delete_project(file_id: str, sheet_name: str, file_name: str, _ok: bool = Depends(require_admin)):
+    data = _budget_download(file_id)
+    wb = be.workbook_from_bytes(data)
+    if sheet_name not in wb.sheetnames:
+        raise HTTPException(status_code=404, detail=f"Projet '{sheet_name}' introuvable.")
+    if len(wb.sheetnames) <= 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Impossible de supprimer le dernier projet d'un artiste — supprime plutôt le fichier artiste entier.",
+        )
+    del wb[sheet_name]
+    new_data = be.workbook_to_bytes(wb)
+    upload_result = _budget_upload(file_name, new_data)
+    return {"deleted": True, "projects": wb.sheetnames, "upload": upload_result}

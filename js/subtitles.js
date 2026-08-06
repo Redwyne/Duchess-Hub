@@ -58,6 +58,7 @@
   const verifyResetBtn = document.getElementById("srt-verifyReset");
   const verifyStatus = document.getElementById("srt-verifyStatus");
   const verifyAudio = document.getElementById("srt-verifyAudio");
+  const referenceLyricsEl = document.getElementById("srt-referenceLyrics");
 
   const form = document.getElementById("srt-genForm");
   const goBtn = document.getElementById("srt-go");
@@ -212,6 +213,14 @@
         schedulePreviewJob();
       }
     });
+  });
+
+  // Si l'utilisateur colle/modifie les vraies paroles de référence après coup (une fois
+  // l'aperçu déjà généré), on relance l'analyse pour que la correction Claude s'aligne dessus —
+  // voir reference_lyrics côté backend (correct_lyrics_with_claude). "change" (perte de focus)
+  // plutôt que "input" pour éviter de relancer un job à chaque frappe.
+  referenceLyricsEl.addEventListener("change", () => {
+    if (selectedFile) schedulePreviewJob();
   });
 
   // ---------------------------------------------------------------------
@@ -523,6 +532,7 @@
     fd.append("option", "preview");
     fd.append("artiste", artisteInput.value.trim());
     fd.append("titre", titreInput.value.trim());
+    fd.append("reference_lyrics", referenceLyricsEl.value.trim());
     fd.append("file", selectedFile);
 
     try {
@@ -1153,6 +1163,7 @@
     fd.append("option", currentOption);
     fd.append("artiste", document.getElementById("srt-artiste").value.trim());
     fd.append("titre", document.getElementById("srt-titre").value.trim());
+    fd.append("reference_lyrics", referenceLyricsEl.value.trim());
     fd.append("file", selectedFile);
     if (editedWords && editedWords.length) {
       // Paroles corrigées dans la section "Vérifier les paroles" — le backend les utilise

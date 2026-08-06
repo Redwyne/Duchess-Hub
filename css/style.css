@@ -1345,6 +1345,23 @@ input[type="color"] {
 
 .verify-time { flex-shrink: 0; font-size: 12px; color: var(--muted-2); font-variant-numeric: tabular-nums; }
 
+.verify-reference {
+  margin-bottom: 16px;
+}
+.verify-reference label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.verify-reference textarea {
+  width: 100%;
+  min-height: 60px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .verify-bulk {
   display: flex;
   align-items: center;

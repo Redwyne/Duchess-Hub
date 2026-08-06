@@ -529,6 +529,11 @@
             <span class="verify-time" id="srt-verifyTime">0:00 / 0:00</span>
           </div>
 
+          <div class="verify-reference">
+            <label for="srt-referenceLyrics">Paroles de référence <span class="hl" style="font-weight:600;">optionnel — bien plus précis si tu les as</span></label>
+            <textarea id="srt-referenceLyrics" rows="3" placeholder="Colle ici les vraies paroles (une ligne par ligne) si tu les as — la correction alignera le texte transcrit dessus au lieu de deviner."></textarea>
+          </div>
+
           <div class="verify-bulk">
             <input type="text" id="srt-bulkFrom" placeholder="Mot à corriger (ex: mansion)" />
             <span class="verify-arrow">→</span>
@@ -788,47 +793,133 @@
 
   <div class="admin-dashboard" id="admin-dashboard">
     <div class="admin-sidebar">
-      <div class="admin-nav-item active">📦 Inventaire</div>
-      <div class="admin-nav-item disabled" title="Bientôt disponible">💰 Budgets Projets</div>
+      <div class="admin-nav-item active" id="admin-nav-inventaire">📦 Inventaire</div>
+      <div class="admin-nav-item" id="admin-nav-budget">💰 Budgets Projets</div>
       <div class="admin-nav-spacer"></div>
       <div class="admin-nav-item" id="admin-logout">↩ Déconnexion</div>
     </div>
     <div class="admin-main">
-      <div class="admin-topbar">
-        <h1>📦 Inventaire</h1>
-        <button class="admin-btn admin-btn-primary admin-btn-add" id="admin-add-row">✚ Ajouter un élément</button>
-      </div>
-      <div id="admin-sync-banner"></div>
-      <div class="admin-sheet-tabs" id="admin-sheet-tabs"></div>
-      <div class="admin-toolbar">
-        <input type="text" id="admin-search-input" placeholder="Rechercher (nom, code article, fournisseur...)">
-        <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-toggle-filters">🔍 Filtres</button>
-        <div class="admin-export-wrap">
-          <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-export-btn">⬇ Exporter</button>
-          <div class="admin-export-menu hidden" id="admin-export-menu">
-            <button type="button" data-export-format="xlsx">📊 Excel (.xlsx)</button>
-            <button type="button" data-export-format="txt">📄 Texte (.txt)</button>
+
+      <div id="admin-view-inventaire">
+        <div class="admin-topbar">
+          <h1>📦 Inventaire</h1>
+          <button class="admin-btn admin-btn-primary admin-btn-add" id="admin-add-row">✚ Ajouter un élément</button>
+        </div>
+        <div id="admin-sync-banner"></div>
+        <div class="admin-sheet-tabs" id="admin-sheet-tabs"></div>
+        <div class="admin-toolbar">
+          <input type="text" id="admin-search-input" placeholder="Rechercher (nom, code article, fournisseur...)">
+          <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-toggle-filters">🔍 Filtres</button>
+          <div class="admin-export-wrap">
+            <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-export-btn">⬇ Exporter</button>
+            <div class="admin-export-menu hidden" id="admin-export-menu">
+              <button type="button" data-export-format="xlsx">📊 Excel (.xlsx)</button>
+              <button type="button" data-export-format="txt">📄 Texte (.txt)</button>
+            </div>
           </div>
         </div>
-      </div>
-      <div class="admin-filters-panel hidden" id="admin-filters-panel"></div>
-      <div class="admin-stats-bar" id="admin-stats-bar"></div>
-      <div class="admin-bulk-bar hidden" id="admin-bulk-bar">
-        <span id="admin-bulk-count">0 sélectionné(s)</span>
-        <div class="admin-bulk-actions">
-          <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-bulk-clear">Désélectionner</button>
-          <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-bulk-edit">✎ Modifier un champ</button>
-          <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-bulk-duplicate">📄 Dupliquer</button>
-          <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-bulk-export">⬇ Exporter</button>
-          <button type="button" class="admin-btn admin-btn-danger admin-btn-sm" id="admin-bulk-delete">🗑 Supprimer</button>
+        <div class="admin-filters-panel hidden" id="admin-filters-panel"></div>
+        <div class="admin-stats-bar" id="admin-stats-bar"></div>
+        <div class="admin-bulk-bar hidden" id="admin-bulk-bar">
+          <span id="admin-bulk-count">0 sélectionné(s)</span>
+          <div class="admin-bulk-actions">
+            <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-bulk-clear">Désélectionner</button>
+            <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-bulk-edit">✎ Modifier un champ</button>
+            <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-bulk-duplicate">📄 Dupliquer</button>
+            <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-bulk-export">⬇ Exporter</button>
+            <button type="button" class="admin-btn admin-btn-danger admin-btn-sm" id="admin-bulk-delete">🗑 Supprimer</button>
+          </div>
         </div>
+        <div id="admin-content"></div>
       </div>
-      <div id="admin-content"></div>
+
+      <div id="admin-view-budget" class="hidden">
+        <div class="admin-topbar">
+          <h1>💰 Budgets Projets</h1>
+          <button class="admin-btn admin-btn-primary admin-btn-add" id="budget-new-artist-btn">✚ Nouvel artiste</button>
+        </div>
+
+        <div class="admin-sheet-tabs budget-artist-tabs" id="budget-artist-tabs"></div>
+
+        <div id="budget-project-bar" class="budget-project-bar hidden">
+          <div class="admin-sheet-tabs budget-project-tabs" id="budget-project-tabs"></div>
+          <div class="budget-project-actions">
+            <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="budget-new-project-btn">✚ Nouveau projet</button>
+            <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="budget-delete-project-btn">🗑 Supprimer ce projet</button>
+          </div>
+        </div>
+
+        <div id="budget-content"></div>
+      </div>
+
     </div>
   </div>
 
   <button type="button" class="admin-fab hidden" id="admin-add-row-fab" title="Ajouter un élément" aria-label="Ajouter un élément">✚</button>
 
+</div>
+
+<!-- Budget : nouvel artiste -->
+<div class="admin-overlay hidden" id="budget-new-artist-overlay">
+  <div class="admin-modal">
+    <h2>Nouvel artiste</h2>
+    <form id="budget-new-artist-form">
+      <div class="admin-field">
+        <label>Nom de l'artiste</label>
+        <input type="text" id="budget-new-artist-name" required placeholder="Lennon">
+      </div>
+      <div class="admin-field">
+        <label>Premier projet (EP / LP / Single)</label>
+        <input type="text" id="budget-new-artist-project" required placeholder="EP n°1">
+      </div>
+      <div class="admin-error-msg" id="budget-new-artist-error"></div>
+      <div class="admin-modal-actions">
+        <button type="button" class="admin-btn admin-btn-ghost" id="budget-new-artist-cancel">Annuler</button>
+        <button type="submit" class="admin-btn admin-btn-primary">Créer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Budget : nouveau projet -->
+<div class="admin-overlay hidden" id="budget-new-project-overlay">
+  <div class="admin-modal">
+    <h2>Nouveau projet</h2>
+    <form id="budget-new-project-form">
+      <div class="admin-field">
+        <label>Nom du projet (EP / LP / Single)</label>
+        <input type="text" id="budget-new-project-name" required placeholder="LP">
+      </div>
+      <div class="admin-error-msg" id="budget-new-project-error"></div>
+      <div class="admin-modal-actions">
+        <button type="button" class="admin-btn admin-btn-ghost" id="budget-new-project-cancel">Annuler</button>
+        <button type="submit" class="admin-btn admin-btn-primary">Créer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Budget : ajouter un sous-poste -->
+<div class="admin-overlay hidden" id="budget-add-sp-overlay">
+  <div class="admin-modal">
+    <h2>Ajouter un sous-poste</h2>
+    <div class="admin-modal-sub" id="budget-add-sp-cat"></div>
+    <form id="budget-add-sp-form">
+      <div class="admin-field" id="budget-add-sp-preset-wrap">
+        <label>Sous-poste</label>
+        <select id="budget-add-sp-preset"></select>
+      </div>
+      <div class="admin-field hidden" id="budget-add-sp-custom-wrap">
+        <label>Nom du sous-poste</label>
+        <input type="text" id="budget-add-sp-custom" placeholder="Nom personnalisé">
+      </div>
+      <div class="admin-error-msg" id="budget-add-sp-error"></div>
+      <div class="admin-modal-actions">
+        <button type="button" class="admin-btn admin-btn-ghost" id="budget-add-sp-cancel">Annuler</button>
+        <button type="submit" class="admin-btn admin-btn-primary">Ajouter</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <!-- Bulk edit popup -->
@@ -917,5 +1008,6 @@
 <script src="js/tiktok-calendar.js"></script>
 <script src="js/subtitles.js"></script>
 <script src="js/admin.js"></script>
+<script src="js/budget.js"></script>
 </body>
 </html>

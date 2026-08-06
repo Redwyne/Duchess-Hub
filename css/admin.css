@@ -325,3 +325,98 @@ tr.admin-row-selected td { background: var(--accent-soft) !important; }
   .admin-bulk-bar { flex-direction: column; align-items: stretch; }
   .admin-bulk-actions { justify-content: flex-start; }
 }
+
+/* =====================================================================
+   Budgets Projets — arbre Catégorie > Sous-poste > Dépense
+   ===================================================================== */
+
+.budget-project-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 18px;
+}
+.budget-project-bar .admin-sheet-tabs { margin-bottom: 0; flex: 1; }
+.budget-project-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+.budget-summary-bar {
+  display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+  padding: 16px 20px; margin-bottom: 20px;
+  background: linear-gradient(135deg, var(--panel-2), var(--card));
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.budget-summary-item { display: flex; flex-direction: column; gap: 2px; }
+.budget-summary-item span { font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+.budget-summary-item b { font-family: var(--font-head); font-size: 18px; }
+.budget-summary-bar #budget-save-btn { margin-left: auto; }
+
+.budget-cat {
+  border: 1px solid var(--border); border-radius: var(--radius-md);
+  margin-bottom: 16px; overflow: hidden; background: var(--card);
+}
+.budget-cat-head {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 14px 16px; background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+.budget-cat-name {
+  font-family: var(--font-head); font-weight: 700; font-size: 14.5px;
+  letter-spacing: .3px; text-transform: uppercase; flex-shrink: 0;
+}
+.budget-add-sp-btn { margin-left: auto; flex-shrink: 0; }
+
+.budget-row-nums { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.budget-num { min-width: 84px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
+.budget-num-ro { color: var(--muted); padding: 7px 4px; }
+.budget-num-input {
+  width: 92px; padding: 6px 8px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--sunken); color: var(--text);
+  text-align: right; font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.budget-num-input:focus { outline: none; border-color: var(--accent); }
+.budget-badge {
+  min-width: 52px; padding: 5px 8px; border-radius: 8px; text-align: center;
+  font-size: 12px; font-weight: 600; background: var(--sunken); color: var(--muted);
+}
+.budget-pct-ok { background: rgba(46,204,113,.14); color: var(--ok); }
+.budget-pct-warn { background: rgba(255,193,7,.16); color: #ffc107; }
+.budget-pct-over { background: rgba(255,92,92,.14); color: var(--err); }
+
+.budget-sp {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 16px 10px 30px; border-bottom: 1px solid var(--border);
+}
+.budget-sp:last-child { border-bottom: none; }
+.budget-sp-container { flex-direction: column; align-items: stretch; padding: 0; background: var(--panel); }
+.budget-sp-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 16px 10px 30px;
+}
+.budget-sp-name { font-weight: 600; font-size: 13.5px; }
+.budget-sp-simple .budget-sp-name { min-width: 160px; flex-shrink: 0; }
+.budget-sp-simple .budget-dep-fourn { flex: 1; min-width: 120px; }
+.budget-sp-simple .budget-row-nums { margin-left: auto; }
+
+.budget-dep {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 7px 16px 7px 52px; font-size: 12.5px; color: var(--muted);
+  border-top: 1px dashed var(--border);
+}
+.budget-dep-label, .budget-dep-fourn {
+  padding: 6px 9px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--sunken); color: var(--text); font-size: 12.5px;
+}
+.budget-dep-label { flex: 1.3; min-width: 110px; font-style: italic; }
+.budget-dep-fourn { flex: 1; min-width: 110px; }
+.budget-dep input.dep-previ, .budget-dep input.dep-realise {
+  width: 84px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--sunken); color: var(--text); text-align: right; font-size: 12.5px;
+}
+.budget-dep input:focus, .budget-dep-label:focus, .budget-dep-fourn:focus { outline: none; border-color: var(--accent); }
+
+@media (max-width: 700px) {
+  .budget-cat-head, .budget-sp-head, .budget-sp { flex-direction: column; align-items: stretch; }
+  .budget-add-sp-btn { margin-left: 0; }
+  .budget-row-nums { justify-content: space-between; }
+  .budget-num, .budget-num-input { width: auto; flex: 1; min-width: 0; }
+  .budget-dep { padding-left: 16px; }
+  .budget-summary-bar #budget-save-btn { margin-left: 0; width: 100%; }
+}
