@@ -290,26 +290,15 @@
     html += '<button type="button" class="admin-btn admin-btn-primary" id="budget-save-btn"' + (dirty ? "" : " disabled") + ">💾 " + (dirty ? "Enregistrer" : "Enregistré") + "</button>";
     html += "</div>";
 
-    // Légende discrète : ce que veulent dire les 3 badges % (répétés à chaque
-    // ligne Catégorie/Sous-poste). Une seule fois en haut de l'arbre, plus un
-    // tooltip individuel sur chaque badge (voir ratioBadges) pour qui préfère
-    // survoler plutôt que se souvenir de l'ordre.
-    html += '<div class="budget-legend">' +
-      '<b>Budget</b> = prévu au départ · <b>Prévisionnel</b> / <b>Réalisé</b> = somme des dépenses ci-dessous · ' +
-      '<span class="budget-badge-mini">Prévi/Budget</span> part du budget déjà engagée · ' +
-      '<span class="budget-badge-mini">Réalisé/Prévi</span> part du prévisionnel déjà payée · ' +
-      '<span class="budget-badge-mini">Réalisé/Budget</span> part du budget déjà payée' +
-      "</div>";
-
     (CATEGORIES.length ? CATEGORIES : (currentTree.categories || []).map((c) => c.name)).forEach((catName) => {
       const cat = catByName(catName) || { name: catName, budget: 0, sous_postes: [], previsionnel: 0, realise: 0, ratios: {} };
       html += '<div class="budget-cat" data-cat="' + escAttr(catName) + '">';
       html += '<div class="budget-cat-head">';
       html += '<div class="budget-cat-name">' + escHtml(catName) + "</div>";
       html += '<div class="budget-row-nums">';
-      html += budgetInput("cat", catName, null, "budget", cat.budget);
-      html += '<div class="budget-num budget-num-ro">' + fmtEur(cat.previsionnel) + "</div>";
-      html += '<div class="budget-num budget-num-ro budget-num-realise">' + fmtEur(cat.realise) + "</div>";
+      html += numCell("Budget", budgetInput("cat", catName, null, "budget", cat.budget));
+      html += numCell("Prévisionnel", '<div class="budget-num budget-num-ro">' + fmtEur(cat.previsionnel) + "</div>");
+      html += numCell("Réalisé", '<div class="budget-num budget-num-ro budget-num-realise">' + fmtEur(cat.realise) + "</div>");
       html += ratioBadges(cat.ratios);
       html += "</div>";
       html += '<button type="button" class="admin-btn admin-btn-ghost admin-btn-sm budget-add-sp-btn" data-cat="' + escAttr(catName) + '">+ sous-poste</button>';
@@ -321,15 +310,15 @@
           html += '<div class="budget-sp-head">';
           html += '<div class="budget-sp-name">' + escHtml(sp.name) + ' :<span class="budget-rename-pencil budget-sp-rename-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" title="Renommer ce sous-poste">✎</span></div>';
           html += '<div class="budget-row-nums">';
-          html += budgetInput("sp", catName, spIdx, "budget", sp.budget);
-          html += '<div class="budget-num budget-num-ro">' + fmtEur(sp.previsionnel) + "</div>";
-          html += '<div class="budget-num budget-num-ro budget-num-realise">' + fmtEur(sp.realise) + "</div>";
+          html += numCell("Budget", budgetInput("sp", catName, spIdx, "budget", sp.budget));
+          html += numCell("Prévisionnel", '<div class="budget-num budget-num-ro">' + fmtEur(sp.previsionnel) + "</div>");
+          html += numCell("Réalisé", '<div class="budget-num budget-num-ro budget-num-realise">' + fmtEur(sp.realise) + "</div>");
           html += ratioBadges(sp.ratios);
           html += "</div>";
           html += '<button type="button" class="admin-btn-icon budget-add-dep-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" title="Ajouter une dépense">＋</button>';
           html += '<button type="button" class="admin-btn-icon admin-btn-icon-danger budget-del-sp-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" title="Supprimer ce sous-poste">🗑</button>';
           html += "</div>";
-          html += '<div class="budget-dep-cols"><span class="budget-dep-col-label"></span><span class="budget-dep-col-label">Fournisseur</span><span class="budget-dep-col-label">Prévisionnel</span><span class="budget-dep-col-label budget-dep-col-realise">Réalisé</span></div>';
+          html += '<div class="budget-dep-cols"><span class="budget-dep-col-label"></span><span class="budget-dep-col-label">Fournisseur</span><span class="budget-dep-col-label">Prévisionnel</span><span class="budget-dep-col-label budget-dep-col-realise">Réalisé</span><span class="budget-dep-col-label budget-dep-col-spacer"></span></div>';
           (sp.depenses || []).forEach((dep, depIdx) => {
             html += '<div class="budget-dep" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" data-dep="' + depIdx + '">';
             html += '<input type="text" class="budget-dep-label" value="' + escAttr(dep.label) + '" data-field="label" placeholder="Dépense">';
@@ -345,9 +334,9 @@
           html += '<div class="budget-sp-name">' + escHtml(sp.name) + '<span class="budget-rename-pencil budget-sp-rename-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" title="Renommer ce sous-poste">✎</span></div>';
           html += '<input type="text" class="budget-dep-fourn" value="' + escAttr(sp.fournisseur) + '" data-field="fournisseur" placeholder="Fournisseur" title="Fournisseur">';
           html += '<div class="budget-row-nums">';
-          html += budgetInput("sp", catName, spIdx, "budget", sp.budget);
-          html += budgetInput("sp", catName, spIdx, "previsionnel", sp.previsionnel);
-          html += budgetInput("sp", catName, spIdx, "realise", sp.realise);
+          html += numCell("Budget", budgetInput("sp", catName, spIdx, "budget", sp.budget));
+          html += numCell("Prévisionnel", budgetInput("sp", catName, spIdx, "previsionnel", sp.previsionnel));
+          html += numCell("Réalisé", budgetInput("sp", catName, spIdx, "realise", sp.realise));
           html += ratioBadges(sp.ratios);
           html += "</div>";
           html += '<button type="button" class="admin-btn-icon admin-btn-icon-danger budget-del-sp-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" title="Supprimer ce sous-poste">🗑</button>';
@@ -370,11 +359,18 @@
     return '<input type="number" step="0.01" class="' + cls + '" value="' + (num(value) || "") +
       '" placeholder="0"' + (title ? ' title="' + escAttr(title) + '"' : "") + ">";
   }
+  // Chaque colonne numérique (Budget/Prévisionnel/Réalisé + les 3 badges %)
+  // porte son propre petit titre juste au-dessus de la valeur — plus besoin
+  // d'une légende à part en haut de l'arbre pour se souvenir de l'ordre.
+  function numCell(label, innerHtml, extraClass) {
+    return '<div class="budget-numcell' + (extraClass ? " " + extraClass : "") + '">' +
+      '<span class="budget-numcell-label">' + escHtml(label) + "</span>" + innerHtml + "</div>";
+  }
   function ratioBadges(ratios) {
     ratios = ratios || {};
-    return '<div class="budget-num budget-badge ' + pctClass(ratios.previ_budget) + '" title="Prévisionnel / Budget — part du budget déjà engagée">' + fmtPct(ratios.previ_budget) + "</div>" +
-      '<div class="budget-num budget-badge ' + pctClass(ratios.realise_previ) + '" title="Réalisé / Prévisionnel — part du prévisionnel déjà payée">' + fmtPct(ratios.realise_previ) + "</div>" +
-      '<div class="budget-num budget-badge ' + pctClass(ratios.realise_budget) + '" title="Réalisé / Budget — part du budget déjà payée">' + fmtPct(ratios.realise_budget) + "</div>";
+    return numCell("Prévi/Budget", '<div class="budget-num budget-badge ' + pctClass(ratios.previ_budget) + '" title="Prévisionnel / Budget — part du budget déjà engagée">' + fmtPct(ratios.previ_budget) + "</div>") +
+      numCell("Réal/Prévi", '<div class="budget-num budget-badge ' + pctClass(ratios.realise_previ) + '" title="Réalisé / Prévisionnel — part du prévisionnel déjà payée">' + fmtPct(ratios.realise_previ) + "</div>") +
+      numCell("Réal/Budget", '<div class="budget-num budget-badge ' + pctClass(ratios.realise_budget) + '" title="Réalisé / Budget — part du budget déjà payée">' + fmtPct(ratios.realise_budget) + "</div>");
   }
   function escHtml(s) { return String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
   function escAttr(s) { return escHtml(s).replace(/"/g, "&quot;"); }

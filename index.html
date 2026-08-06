@@ -499,7 +499,11 @@
             <input id="srt-titre" placeholder="Toi & Moi" />
           </div>
         </div>
-        <div class="hint">💡 Si ce single a déjà été traité ailleurs sur le hub, les paroles timées sont réutilisées automatiquement — pas besoin de retranscrire.</div>
+        <div class="field">
+          <label for="srt-flowstageAesthetic">Aesthetic Flowstage <span class="hl" style="font-weight:600;">optionnel — si tu connais le nom exact</span></label>
+          <input id="srt-flowstageAesthetic" placeholder="ex: 0006 Toi & Moi" />
+        </div>
+        <div class="hint">💡 Si ce single a déjà été traité ailleurs sur le hub, ou si tu donnes le nom exact de l'aesthetic Flowstage ci-dessus, les paroles vérifiées et leur timing sont réutilisés automatiquement — pas besoin de retranscrire.</div>
 
         <div class="field">
           <label id="srt-dzLabel">Fichier audio</label>
@@ -836,12 +840,16 @@
       <div id="admin-view-budget" class="hidden">
         <div class="admin-topbar">
           <h1>💰 Budgets Projets</h1>
-          <button class="admin-btn admin-btn-primary admin-btn-add" id="budget-new-artist-btn">✚ Nouvel artiste</button>
         </div>
 
-        <div class="admin-sheet-tabs budget-artist-tabs" id="budget-artist-tabs"></div>
+        <div class="budget-tabs-row budget-tabs-row-artist">
+          <span class="budget-tabs-label">🎤 Artiste</span>
+          <div class="admin-sheet-tabs budget-artist-tabs" id="budget-artist-tabs"></div>
+          <button class="admin-btn admin-btn-primary admin-btn-sm budget-new-artist-btn" id="budget-new-artist-btn">✚ Nouvel artiste</button>
+        </div>
 
         <div id="budget-project-bar" class="budget-project-bar hidden">
+          <span class="budget-tabs-label budget-tabs-label-project">💿 Projet</span>
           <div class="admin-sheet-tabs budget-project-tabs" id="budget-project-tabs"></div>
           <div class="budget-project-actions">
             <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="budget-new-project-btn">✚ Nouveau projet</button>

@@ -59,6 +59,7 @@
   const verifyStatus = document.getElementById("srt-verifyStatus");
   const verifyAudio = document.getElementById("srt-verifyAudio");
   const referenceLyricsEl = document.getElementById("srt-referenceLyrics");
+  const flowstageAestheticEl = document.getElementById("srt-flowstageAesthetic");
 
   const form = document.getElementById("srt-genForm");
   const goBtn = document.getElementById("srt-go");
@@ -220,6 +221,9 @@
   // voir reference_lyrics côté backend (correct_lyrics_with_claude). "change" (perte de focus)
   // plutôt que "input" pour éviter de relancer un job à chaque frappe.
   referenceLyricsEl.addEventListener("change", () => {
+    if (selectedFile) schedulePreviewJob();
+  });
+  flowstageAestheticEl.addEventListener("change", () => {
     if (selectedFile) schedulePreviewJob();
   });
 
@@ -533,6 +537,7 @@
     fd.append("artiste", artisteInput.value.trim());
     fd.append("titre", titreInput.value.trim());
     fd.append("reference_lyrics", referenceLyricsEl.value.trim());
+    fd.append("aesthetic_hint", flowstageAestheticEl.value.trim());
     fd.append("file", selectedFile);
 
     try {
@@ -1164,6 +1169,7 @@
     fd.append("artiste", document.getElementById("srt-artiste").value.trim());
     fd.append("titre", document.getElementById("srt-titre").value.trim());
     fd.append("reference_lyrics", referenceLyricsEl.value.trim());
+    fd.append("aesthetic_hint", flowstageAestheticEl.value.trim());
     fd.append("file", selectedFile);
     if (editedWords && editedWords.length) {
       // Paroles corrigées dans la section "Vérifier les paroles" — le backend les utilise

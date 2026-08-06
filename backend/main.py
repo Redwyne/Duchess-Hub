@@ -349,11 +349,31 @@ def get_flowstage_aesthetics():
         return []
 
 
-def find_flowstage_aesthetic(artiste: str, titre: str):
-    if not (artiste or "").strip() and not (titre or "").strip():
-        return None
+def find_flowstage_aesthetic(artiste: str, titre: str, aesthetic_hint: str = ""):
     aesthetics = get_flowstage_aesthetics()
     if not aesthetics:
+        return None
+    # Si l'utilisateur donne directement le nom (ou un fragment) de l'aesthetic Flowstage visée,
+    # on la cherche en priorité avec un seuil plus permissif (0.5 au lieu de 0.55) — c'est un
+    # choix délibéré de l'utilisateur, pas une devinette artiste/titre, donc moins de risque de
+    # faux positif même avec un score plus bas. Si rien de concluant, on retombe sur le matching
+    # artiste/titre habituel ci-dessous plutôt que d'abandonner.
+    hint_norm = _normalize_match(aesthetic_hint)
+    if hint_norm:
+        best_hint, best_hint_score = None, 0.0
+        for a in aesthetics:
+            name_norm = _normalize_match(a.get("name", ""))
+            if not name_norm:
+                continue
+            score = difflib.SequenceMatcher(None, hint_norm, name_norm).ratio()
+            if len(hint_norm) >= 3 and hint_norm in name_norm:
+                score = max(score, 0.95)
+            if score > best_hint_score:
+                best_hint_score, best_hint = score, a
+        if best_hint and best_hint_score >= 0.5:
+            return best_hint
+
+    if not (artiste or "").strip() and not (titre or "").strip():
         return None
     target_full = _normalize_match(f"{artiste} {titre}")
     target_titre = _normalize_match(titre)
@@ -517,7 +537,7 @@ def _merge_apostrophe_words(words):
     return merged
 
 
-def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artiste: str = "", titre: str = "", reference_lyrics: str = ""):
+def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artiste: str = "", titre: str = "", reference_lyrics: str = "", aesthetic_hint: str = ""):
     """Source des paroles timées, par ordre de préférence :
     1. Cache local (déjà généré une fois, peu importe la source d'origine).
     2. Flowstage (paroles vérifiées manuellement, bien plus fiables qu'une transcription
@@ -548,6 +568,19 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
     if row:
         words = json.loads(row["timing_json"])
         source = row["source_audio"] or "cache"
+        # Un hint d'aesthetic Flowstage fourni APRÈS coup (le cache contient une transcription
+        # whisper parce que le matching flou automatique n'avait rien trouvé) doit pouvoir
+        # débloquer les vraies paroles Flowstage sans attendre — on retente Flowstage en priorité
+        # avant l'upgrade paresseux ci-dessous.
+        if aesthetic_hint.strip() and source != "flowstage" and source != "verifie_manuellement" and FLOWSTAGE_API_KEY:
+            aesthetic = find_flowstage_aesthetic(artiste, titre, aesthetic_hint)
+            if aesthetic:
+                expected_duration = _probe_audio_duration(audio_path)
+                fs_words = get_flowstage_words(aesthetic["id"], granularity, expected_duration_s=expected_duration)
+                if fs_words:
+                    fs_words = _merge_apostrophe_words(fs_words)
+                    _cache_timing(single_cle, granularity, fs_words, "flowstage")
+                    return fs_words, "flowstage"
         # Upgrade paresseux : une entrée déjà en cache en "audio_uploade" (whisper brut, jamais
         # corrigé — soit un cache antérieur à l'ajout de la correction Claude, soit une tentative
         # de correction qui avait échoué à l'époque) est retentée maintenant si une clé Anthropic
@@ -567,7 +600,7 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
         return words, source
 
     if FLOWSTAGE_API_KEY:
-        aesthetic = find_flowstage_aesthetic(artiste, titre)
+        aesthetic = find_flowstage_aesthetic(artiste, titre, aesthetic_hint)
         if aesthetic:
             expected_duration = _probe_audio_duration(audio_path)
             words = get_flowstage_words(aesthetic["id"], granularity, expected_duration_s=expected_duration)
@@ -1049,7 +1082,7 @@ def process_job(
     job_id, option, artiste, titre, upload_path: Path, font, font_weight, size_pct, color, mode,
     position="centre", effect="none", outline_color="#000000", outline_width="normal",
     fond="contour", text_case="majuscule", accent_color="#ffd400", italic=False, words_per_group=3,
-    edited_words="", reference_lyrics="",
+    edited_words="", reference_lyrics="", aesthetic_hint="",
 ):
     try:
         if option == "preview":
@@ -1081,7 +1114,7 @@ def process_job(
         else:
             words, lyrics_source = get_or_transcribe(
                 single_cle, granularity, audio_path, artiste=artiste, titre=titre,
-                reference_lyrics=reference_lyrics,
+                reference_lyrics=reference_lyrics, aesthetic_hint=aesthetic_hint,
             )
         update_job(job_id, step_lyrics=1, current_label="Paroles timées")
 
@@ -1235,6 +1268,7 @@ async def create_job(
     words_per_group: str = Form("3"),
     edited_words: str = Form(""),
     reference_lyrics: str = Form(""),
+    aesthetic_hint: str = Form(""),
     file: UploadFile = File(...),
 ):
     conn = db()
@@ -1257,7 +1291,7 @@ async def create_job(
             position=position, effect=effect, outline_color=outline_color,
             outline_width=outline_width, fond=fond, text_case=text_case, accent_color=accent_color,
             italic=str(italic).lower() in ("1", "true", "on", "yes"), words_per_group=words_per_group,
-            edited_words=edited_words, reference_lyrics=reference_lyrics,
+            edited_words=edited_words, reference_lyrics=reference_lyrics, aesthetic_hint=aesthetic_hint,
         ),
         daemon=True,
     ).start()

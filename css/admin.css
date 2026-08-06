@@ -330,12 +330,38 @@ tr.admin-row-selected td { background: var(--accent-soft) !important; }
    Budgets Projets — arbre Catégorie > Sous-poste > Dépense
    ===================================================================== */
 
-.budget-project-bar {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; flex-wrap: wrap; margin-bottom: 18px;
+/* Ligne "Artiste" (choix du fichier) et ligne "Projet" (choix du feuillet) —
+   différenciées visuellement (Michel : "distinction plus claire entre choix
+   des artistes et choix des projets") : l'artiste est le choix primaire (pastille
+   pleine, dorée), le projet est imbriqué dessous (pastille en contour, plus
+   petite, légèrement indentée). Un petit intitulé précède chaque ligne. */
+.budget-tabs-row {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px;
 }
-.budget-project-bar .admin-sheet-tabs { margin-bottom: 0; flex: 1; }
-.budget-project-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.budget-tabs-row-artist { margin-bottom: 18px; }
+.budget-tabs-label {
+  font-family: var(--font-head); font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .5px; color: var(--muted);
+  flex-shrink: 0;
+}
+.budget-tabs-row .admin-sheet-tabs { margin-bottom: 0; }
+.budget-new-artist-btn { flex-shrink: 0; }
+
+.budget-project-bar {
+  display: flex; align-items: center; justify-content: flex-start;
+  gap: 10px; flex-wrap: wrap; margin-bottom: 18px;
+  padding: 10px 14px 10px 22px; border-left: 2px solid var(--border);
+}
+.budget-tabs-label-project { color: var(--accent-2); }
+.budget-project-bar .admin-sheet-tabs { margin-bottom: 0; }
+.budget-project-tabs .admin-sheet-tab {
+  border-radius: var(--radius-sm); background: transparent;
+  border: 1px solid var(--border); font-size: 12px; padding: 6px 12px;
+}
+.budget-project-tabs .admin-sheet-tab.active {
+  background: transparent; border-color: var(--accent-2); color: var(--accent-2);
+}
+.budget-project-actions { display: flex; gap: 8px; flex-shrink: 0; margin-left: auto; }
 
 .budget-summary-bar {
   display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
@@ -363,7 +389,15 @@ tr.admin-row-selected td { background: var(--accent-soft) !important; }
 }
 .budget-add-sp-btn { margin-left: auto; flex-shrink: 0; }
 
-.budget-row-nums { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.budget-row-nums { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; }
+/* Chaque colonne numérique porte son propre petit titre juste au-dessus de
+   sa valeur (Michel : "les titres au-dessus des pourcentages, pas un
+   explicatif au-dessus") — plus de légende séparée à lire en haut de l'arbre. */
+.budget-numcell { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+.budget-numcell-label {
+  font-size: 9px; text-transform: uppercase; letter-spacing: .35px;
+  color: var(--muted); font-weight: 600; padding-right: 2px;
+}
 .budget-num { min-width: 84px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
 .budget-num-ro { color: var(--muted); padding: 7px 4px; }
 /* Réalisé = l'argent réellement dépensé, la donnée la plus regardée — on la
@@ -383,18 +417,6 @@ tr.admin-row-selected td { background: var(--accent-soft) !important; }
 .budget-pct-ok { background: rgba(46,204,113,.14); color: var(--ok); }
 .budget-pct-warn { background: rgba(255,193,7,.16); color: #ffc107; }
 .budget-pct-over { background: rgba(255,92,92,.14); color: var(--err); }
-
-/* Légende discrète des 3 %, une fois en haut de l'arbre (redondante avec les
-   tooltips title="" sur chaque badge, pour qui n'a pas le réflexe de survoler). */
-.budget-legend {
-  font-size: 11.5px; color: var(--muted); line-height: 1.6;
-  padding: 8px 4px 16px; border-bottom: 1px dashed var(--border); margin-bottom: 16px;
-}
-.budget-legend b { color: var(--text); font-weight: 600; }
-.budget-badge-mini {
-  display: inline-block; padding: 1px 6px; border-radius: 6px;
-  background: var(--sunken); font-weight: 600; color: var(--text); font-size: 11px;
-}
 
 /* Petit ✎ discret pour renommer (artiste actif / projet actif / sous-poste). */
 .budget-rename-pencil {
@@ -420,34 +442,36 @@ tr.admin-row-selected td { background: var(--accent-soft) !important; }
 
 /* Petite ligne d'en-tête de colonnes au-dessus des dépenses d'un sous-poste —
    une seule fois par sous-poste (pas répétée à chaque ligne), pour qu'on sache
-   tout de suite où saisir quoi sans avoir à deviner. */
+   tout de suite où saisir quoi sans avoir à deviner.
+   Alignement garanti par une grille CSS PARTAGÉE (mêmes pistes, même gap, même
+   padding) avec .budget-dep ci-dessous — y compris une piste vide finale qui
+   matche la largeur du bouton 🗑, sinon les libellés glissent (Michel : "fixe
+   les bien au-dessus"). Ne plus repasser en flex + nth-child ici. */
+.budget-dep-cols, .budget-dep {
+  display: grid; grid-template-columns: 1.3fr 100px 92px 92px 30px;
+  gap: 8px; align-items: center; padding-left: 52px; padding-right: 16px;
+}
 .budget-dep-cols {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 4px 16px 2px 52px; font-size: 10px; text-transform: uppercase;
+  padding-top: 4px; padding-bottom: 2px; font-size: 10px; text-transform: uppercase;
   letter-spacing: .4px; color: var(--muted);
 }
-.budget-dep-col-label:nth-child(1) { flex: 1.3; min-width: 110px; }
-.budget-dep-col-label:nth-child(2) { flex: 0 0 100px; }
-.budget-dep-col-label:nth-child(3), .budget-dep-col-label:nth-child(4) { width: 92px; text-align: right; }
+.budget-dep-col-label:nth-child(3), .budget-dep-col-label:nth-child(4) { text-align: right; }
 .budget-dep-col-realise { color: var(--text); font-weight: 700; }
 
 /* Dépenses : c'est le niveau de saisie le plus fin et le plus consulté — trop
    discret avant (petit, italique, gris) pour ce que Michel voulait. Police et
    contraste remontés, le Réalisé (colonne la plus importante) mis en avant. */
 .budget-dep {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 8px 16px 8px 52px; font-size: 13px; color: var(--text);
+  padding-top: 8px; padding-bottom: 8px; font-size: 13px; color: var(--text);
   border-top: 1px dashed var(--border);
 }
 .budget-dep-label, .budget-dep-fourn {
   padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border);
-  background: var(--sunken); color: var(--text); font-size: 13px;
+  background: var(--sunken); color: var(--text); font-size: 13px; width: 100%; min-width: 0;
 }
-.budget-dep-label { flex: 1.3; min-width: 110px; }
 /* Fournisseur réduit — Michel : "plus petit", ce n'est pas la donnée principale. */
-.budget-dep-fourn { flex: 0 0 100px; min-width: 0; }
 .budget-dep input.dep-previ, .budget-dep input.dep-realise {
-  width: 92px; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--border);
+  width: 100%; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--border);
   background: var(--sunken); color: var(--text); text-align: right; font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
@@ -456,14 +480,25 @@ tr.admin-row-selected td { background: var(--accent-soft) !important; }
   background: var(--panel-2); border-color: var(--accent);
 }
 .budget-dep input:focus, .budget-dep-label:focus, .budget-dep-fourn:focus { outline: none; border-color: var(--accent); }
+.budget-dep .budget-del-dep-btn { justify-self: center; }
 
 @media (max-width: 700px) {
   .budget-cat-head, .budget-sp-head, .budget-sp { flex-direction: column; align-items: stretch; }
   .budget-add-sp-btn { margin-left: 0; }
   .budget-row-nums { justify-content: space-between; }
   .budget-num, .budget-num-input { width: auto; flex: 1; min-width: 0; }
-  .budget-dep { padding-left: 16px; }
-  .budget-dep-fourn { flex: 1 1 100%; }
+  .budget-numcell { align-items: stretch; }
   .budget-dep-cols { display: none; }
+  .budget-dep {
+    grid-template-columns: 1fr 1fr; grid-template-areas: "label label" "fourn fourn" "previ realise" "del del";
+    padding-left: 16px;
+  }
+  .budget-dep-label { grid-area: label; }
+  .budget-dep-fourn { grid-area: fourn; }
+  .budget-dep input.dep-previ { grid-area: previ; }
+  .budget-dep input.dep-realise { grid-area: realise; }
+  .budget-dep .budget-del-dep-btn { grid-area: del; justify-self: end; }
   .budget-summary-bar #budget-save-btn { margin-left: 0; width: 100%; }
+  .budget-tabs-row, .budget-project-bar { align-items: flex-start; }
+  .budget-project-bar { padding-left: 14px; border-left-width: 3px; }
 }
