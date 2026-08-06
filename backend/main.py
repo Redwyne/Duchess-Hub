@@ -349,7 +349,19 @@ def _interpolate_words(lines_abs):
     return words
 
 
-def get_flowstage_words(aesthetic_id: str, granularity: str):
+def get_flowstage_words(aesthetic_id: str, granularity: str, expected_duration_s: float = 0.0):
+    """Récupère les paroles de l'aesthetic Flowstage donnée.
+
+    Piège découvert en test réel : le champ "audios" d'une aesthetic ne contient pas forcément
+    le morceau entier — certaines entrées sont en fait un CLIP découpé du single (nom du type
+    "... -clip-51s-84s", quelques dizaines de secondes) dont les timestamps de lignes sont
+    relatifs au DÉBUT DU CLIP, pas au morceau original. Si on applique ces temps tels quels à
+    une vidéo qui couvre une autre portion (ou la totalité) du morceau, les sous-titres tombent
+    n'importe quand et la majorité de la vidéo n'a plus aucune ligne (symptômes rapportés :
+    "pas du tout dans les temps" + "beaucoup manquent"). Pour éviter ça, on ne fait confiance à
+    un audio Flowstage que si sa durée colle à peu près à celle de l'audio réellement uploadé
+    (`expected_duration_s`, calculée juste avant l'appel) — sinon on laisse `get_or_transcribe`
+    retomber sur faster-whisper plutôt que de servir un timing garanti faux."""
     try:
         r = requests.get(
             f"{FLOWSTAGE_BASE_URL}/v1/aesthetics/{aesthetic_id}/audios",
@@ -362,19 +374,44 @@ def get_flowstage_words(aesthetic_id: str, granularity: str):
         print(f"[Flowstage] récupération paroles échouée: {e}")
         return None
 
-    lines_abs = []
+    if not audios:
+        return None
+
+    # S'il y a plusieurs entrées "audios" pour cette aesthetic, on prend celle dont la durée
+    # colle le mieux à l'audio uploadé (le plus souvent il n'y en a qu'une, mais autant être
+    # robuste). Tolérance : 3s ou 3% de la durée attendue, le plus grand des deux — assez
+    # serré pour distinguer un clip de 30s du morceau entier de 3 min, assez large pour
+    # absorber les petits écarts d'encodage entre l'audio Flowstage et l'upload de Michel.
+    best_audio, best_diff = None, None
     for audio in audios:
-        for section in audio.get("sections", []):
-            sec_start = section.get("start_time", 0) or 0
-            for line in section.get("lines", []):
-                text = (line.get("text") or "").strip()
-                if not text:
-                    continue
-                lines_abs.append({
-                    "text": text,
-                    "start": sec_start + (line.get("start_time", 0) or 0),
-                    "end": sec_start + (line.get("end_time", 0) or 0),
-                })
+        dur = audio.get("duration") or 0
+        diff = abs(dur - expected_duration_s) if expected_duration_s else 0
+        if best_diff is None or diff < best_diff:
+            best_audio, best_diff = audio, diff
+
+    if expected_duration_s and best_audio is not None:
+        tolerance = max(3.0, 0.03 * expected_duration_s)
+        if best_diff is not None and best_diff > tolerance:
+            print(
+                f"[Flowstage] audio '{best_audio.get('name')}' rejeté : durée "
+                f"{best_audio.get('duration')}s vs upload {expected_duration_s:.1f}s "
+                f"(écart {best_diff:.1f}s > tolérance {tolerance:.1f}s) — probablement un clip "
+                f"partiel du morceau, pas le fichier uploadé. Repli sur la transcription."
+            )
+            return None
+
+    lines_abs = []
+    for section in (best_audio or {}).get("sections", []):
+        sec_start = section.get("start_time", 0) or 0
+        for line in section.get("lines", []):
+            text = (line.get("text") or "").strip()
+            if not text:
+                continue
+            lines_abs.append({
+                "text": text,
+                "start": sec_start + (line.get("start_time", 0) or 0),
+                "end": sec_start + (line.get("end_time", 0) or 0),
+            })
     lines_abs.sort(key=lambda l: l["start"])
     if not lines_abs:
         return None
@@ -392,11 +429,24 @@ def _cache_timing(single_cle: str, granularity: str, words, source: str):
     conn.close()
 
 
+def _probe_audio_duration(audio_path: Path) -> float:
+    try:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(audio_path)],
+            capture_output=True, text=True,
+        )
+        return float((probe.stdout or "0").strip() or 0)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
 def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artiste: str = "", titre: str = ""):
     """Source des paroles timées, par ordre de préférence :
     1. Cache local (déjà généré une fois, peu importe la source d'origine).
     2. Flowstage (paroles vérifiées manuellement, bien plus fiables qu'une transcription
-       automatique — voir find_flowstage_aesthetic / get_flowstage_words).
+       automatique — voir find_flowstage_aesthetic / get_flowstage_words). Rejetée si la durée
+       de l'audio Flowstage ne colle pas à celle de l'upload (voir get_flowstage_words) — un
+       "audio" Flowstage peut n'être qu'un clip partiel du morceau, pas le morceau entier.
     3. Repli : transcription faster-whisper de l'audio uploadé."""
     conn = db()
     row = conn.execute(
@@ -410,7 +460,8 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
     if FLOWSTAGE_API_KEY:
         aesthetic = find_flowstage_aesthetic(artiste, titre)
         if aesthetic:
-            words = get_flowstage_words(aesthetic["id"], granularity)
+            expected_duration = _probe_audio_duration(audio_path)
+            words = get_flowstage_words(aesthetic["id"], granularity, expected_duration_s=expected_duration)
             if words:
                 _cache_timing(single_cle, granularity, words, "flowstage")
                 return words
