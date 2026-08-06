@@ -146,9 +146,13 @@
     const wrap = document.getElementById("budget-artist-tabs");
     wrap.innerHTML = "";
     ARTISTS.forEach((a) => {
+      const isActive = currentArtist && currentArtist.fileId === a.fileId;
       const tab = document.createElement("div");
-      tab.className = "admin-sheet-tab" + (currentArtist && currentArtist.fileId === a.fileId ? " active" : "");
-      tab.textContent = "🎤 " + a.artist;
+      tab.className = "admin-sheet-tab" + (isActive ? " active" : "");
+      const label = document.createElement("span");
+      label.textContent = "🎤 " + a.artist;
+      tab.appendChild(label);
+      if (isActive) tab.appendChild(renamePencil("Renommer l'artiste", () => openRenameModal("artist", a.artist)));
       tab.addEventListener("click", () => selectArtist(a));
       wrap.appendChild(tab);
     });
@@ -174,12 +178,26 @@
     const wrap = document.getElementById("budget-project-tabs");
     wrap.innerHTML = "";
     currentProjects.forEach((name) => {
+      const isActive = currentProject === name;
       const tab = document.createElement("div");
-      tab.className = "admin-sheet-tab" + (currentProject === name ? " active" : "");
-      tab.textContent = name;
+      tab.className = "admin-sheet-tab" + (isActive ? " active" : "");
+      const label = document.createElement("span");
+      label.textContent = name;
+      tab.appendChild(label);
+      if (isActive) tab.appendChild(renamePencil("Renommer le projet", () => openRenameModal("project", name)));
       tab.addEventListener("click", () => selectProject(name));
       wrap.appendChild(tab);
     });
+  }
+
+  /* Petit ✎ discret, réutilisé pour renommer artiste / projet / sous-poste. */
+  function renamePencil(title, onClick) {
+    const pencil = document.createElement("span");
+    pencil.className = "budget-rename-pencil";
+    pencil.textContent = "✎";
+    pencil.title = title;
+    pencil.addEventListener("click", (e) => { e.stopPropagation(); onClick(); });
+    return pencil;
   }
 
   async function selectProject(name) {
@@ -272,6 +290,17 @@
     html += '<button type="button" class="admin-btn admin-btn-primary" id="budget-save-btn"' + (dirty ? "" : " disabled") + ">💾 " + (dirty ? "Enregistrer" : "Enregistré") + "</button>";
     html += "</div>";
 
+    // Légende discrète : ce que veulent dire les 3 badges % (répétés à chaque
+    // ligne Catégorie/Sous-poste). Une seule fois en haut de l'arbre, plus un
+    // tooltip individuel sur chaque badge (voir ratioBadges) pour qui préfère
+    // survoler plutôt que se souvenir de l'ordre.
+    html += '<div class="budget-legend">' +
+      '<b>Budget</b> = prévu au départ · <b>Prévisionnel</b> / <b>Réalisé</b> = somme des dépenses ci-dessous · ' +
+      '<span class="budget-badge-mini">Prévi/Budget</span> part du budget déjà engagée · ' +
+      '<span class="budget-badge-mini">Réalisé/Prévi</span> part du prévisionnel déjà payée · ' +
+      '<span class="budget-badge-mini">Réalisé/Budget</span> part du budget déjà payée' +
+      "</div>";
+
     (CATEGORIES.length ? CATEGORIES : (currentTree.categories || []).map((c) => c.name)).forEach((catName) => {
       const cat = catByName(catName) || { name: catName, budget: 0, sous_postes: [], previsionnel: 0, realise: 0, ratios: {} };
       html += '<div class="budget-cat" data-cat="' + escAttr(catName) + '">';
@@ -280,7 +309,7 @@
       html += '<div class="budget-row-nums">';
       html += budgetInput("cat", catName, null, "budget", cat.budget);
       html += '<div class="budget-num budget-num-ro">' + fmtEur(cat.previsionnel) + "</div>";
-      html += '<div class="budget-num budget-num-ro">' + fmtEur(cat.realise) + "</div>";
+      html += '<div class="budget-num budget-num-ro budget-num-realise">' + fmtEur(cat.realise) + "</div>";
       html += ratioBadges(cat.ratios);
       html += "</div>";
       html += '<button type="button" class="admin-btn admin-btn-ghost admin-btn-sm budget-add-sp-btn" data-cat="' + escAttr(catName) + '">+ sous-poste</button>';
@@ -290,30 +319,31 @@
         if (sp.type === "container") {
           html += '<div class="budget-sp budget-sp-container" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '">';
           html += '<div class="budget-sp-head">';
-          html += '<div class="budget-sp-name">' + escHtml(sp.name) + " :</div>";
+          html += '<div class="budget-sp-name">' + escHtml(sp.name) + ' :<span class="budget-rename-pencil budget-sp-rename-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" title="Renommer ce sous-poste">✎</span></div>';
           html += '<div class="budget-row-nums">';
           html += budgetInput("sp", catName, spIdx, "budget", sp.budget);
           html += '<div class="budget-num budget-num-ro">' + fmtEur(sp.previsionnel) + "</div>";
-          html += '<div class="budget-num budget-num-ro">' + fmtEur(sp.realise) + "</div>";
+          html += '<div class="budget-num budget-num-ro budget-num-realise">' + fmtEur(sp.realise) + "</div>";
           html += ratioBadges(sp.ratios);
           html += "</div>";
           html += '<button type="button" class="admin-btn-icon budget-add-dep-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" title="Ajouter une dépense">＋</button>';
           html += '<button type="button" class="admin-btn-icon admin-btn-icon-danger budget-del-sp-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" title="Supprimer ce sous-poste">🗑</button>';
           html += "</div>";
+          html += '<div class="budget-dep-cols"><span class="budget-dep-col-label"></span><span class="budget-dep-col-label">Fournisseur</span><span class="budget-dep-col-label">Prévisionnel</span><span class="budget-dep-col-label budget-dep-col-realise">Réalisé</span></div>';
           (sp.depenses || []).forEach((dep, depIdx) => {
             html += '<div class="budget-dep" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" data-dep="' + depIdx + '">';
             html += '<input type="text" class="budget-dep-label" value="' + escAttr(dep.label) + '" data-field="label" placeholder="Dépense">';
-            html += '<input type="text" class="budget-dep-fourn" value="' + escAttr(dep.fournisseur) + '" data-field="fournisseur" placeholder="Fournisseur">';
-            html += numInput("dep-previ", dep.previsionnel);
-            html += numInput("dep-realise", dep.realise);
+            html += '<input type="text" class="budget-dep-fourn" value="' + escAttr(dep.fournisseur) + '" data-field="fournisseur" placeholder="Fournisseur" title="Fournisseur">';
+            html += numInput("dep-previ", dep.previsionnel, "Prévisionnel (€)");
+            html += numInput("dep-realise budget-dep-realise-input", dep.realise, "Réalisé (€)");
             html += '<button type="button" class="admin-btn-icon admin-btn-icon-danger budget-del-dep-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" data-dep="' + depIdx + '" title="Supprimer cette dépense">🗑</button>';
             html += "</div>";
           });
           html += "</div>";
         } else {
           html += '<div class="budget-sp budget-sp-simple" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '">';
-          html += '<div class="budget-sp-name">' + escHtml(sp.name) + "</div>";
-          html += '<input type="text" class="budget-dep-fourn" value="' + escAttr(sp.fournisseur) + '" data-field="fournisseur" placeholder="Fournisseur">';
+          html += '<div class="budget-sp-name">' + escHtml(sp.name) + '<span class="budget-rename-pencil budget-sp-rename-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" title="Renommer ce sous-poste">✎</span></div>';
+          html += '<input type="text" class="budget-dep-fourn" value="' + escAttr(sp.fournisseur) + '" data-field="fournisseur" placeholder="Fournisseur" title="Fournisseur">';
           html += '<div class="budget-row-nums">';
           html += budgetInput("sp", catName, spIdx, "budget", sp.budget);
           html += budgetInput("sp", catName, spIdx, "previsionnel", sp.previsionnel);
@@ -336,14 +366,15 @@
       '" data-cat="' + escAttr(catName) + '"' + (spIdx !== null ? ' data-sp="' + spIdx + '"' : "") +
       ' data-field="' + field + '" value="' + (num(value) || "") + '" placeholder="0">';
   }
-  function numInput(cls, value) {
-    return '<input type="number" step="0.01" class="' + cls + '" value="' + (num(value) || "") + '" placeholder="0">';
+  function numInput(cls, value, title) {
+    return '<input type="number" step="0.01" class="' + cls + '" value="' + (num(value) || "") +
+      '" placeholder="0"' + (title ? ' title="' + escAttr(title) + '"' : "") + ">";
   }
   function ratioBadges(ratios) {
     ratios = ratios || {};
-    return '<div class="budget-num budget-badge ' + pctClass(ratios.previ_budget) + '">' + fmtPct(ratios.previ_budget) + "</div>" +
-      '<div class="budget-num budget-badge ' + pctClass(ratios.realise_previ) + '">' + fmtPct(ratios.realise_previ) + "</div>" +
-      '<div class="budget-num budget-badge ' + pctClass(ratios.realise_budget) + '">' + fmtPct(ratios.realise_budget) + "</div>";
+    return '<div class="budget-num budget-badge ' + pctClass(ratios.previ_budget) + '" title="Prévisionnel / Budget — part du budget déjà engagée">' + fmtPct(ratios.previ_budget) + "</div>" +
+      '<div class="budget-num budget-badge ' + pctClass(ratios.realise_previ) + '" title="Réalisé / Prévisionnel — part du prévisionnel déjà payée">' + fmtPct(ratios.realise_previ) + "</div>" +
+      '<div class="budget-num budget-badge ' + pctClass(ratios.realise_budget) + '" title="Réalisé / Budget — part du budget déjà payée">' + fmtPct(ratios.realise_budget) + "</div>";
   }
   function escHtml(s) { return String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
   function escAttr(s) { return escHtml(s).replace(/"/g, "&quot;"); }
@@ -390,6 +421,16 @@
 
     contentEl.querySelectorAll(".budget-add-sp-btn").forEach((btn) => {
       btn.addEventListener("click", () => openAddSpModal(btn.dataset.cat));
+    });
+    contentEl.querySelectorAll(".budget-sp-rename-btn").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const spIdx = parseInt(btn.dataset.sp, 10);
+        const cat = catByName(btn.dataset.cat);
+        const sp = cat && cat.sous_postes[spIdx];
+        if (!sp) return;
+        openRenameModal("sp", sp.name, { catName: btn.dataset.cat, spIdx });
+      });
     });
     contentEl.querySelectorAll(".budget-add-dep-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -447,6 +488,70 @@
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = "💾 Enregistrer"; }
     }
   }
+
+  /* ---------------------------- Modale générique : renommer ---------------------------- */
+  // Réutilisée pour artiste / projet / sous-poste — évite 3 modales quasi
+  // identiques. Artiste et projet renomment tout de suite côté serveur
+  // (fichier/feuillet réel sur SharePoint) ; sous-poste ne fait qu'éditer
+  // l'arbre local, comme les autres champs — sauvegardé au prochain "Enregistrer".
+  let renameContext = null;
+  const renameOverlay = document.getElementById("budget-rename-overlay");
+  const RENAME_TITLES = { artist: "Renommer l'artiste", project: "Renommer le projet", sp: "Renommer le sous-poste" };
+
+  function openRenameModal(type, currentName, extra) {
+    renameContext = Object.assign({ type }, extra || {});
+    document.getElementById("budget-rename-title").textContent = RENAME_TITLES[type] || "Renommer";
+    document.getElementById("budget-rename-error").textContent = "";
+    const input = document.getElementById("budget-rename-input");
+    input.value = currentName || "";
+    renameOverlay.classList.remove("hidden");
+    input.focus();
+    input.select();
+  }
+  document.getElementById("budget-rename-cancel").addEventListener("click", () => renameOverlay.classList.add("hidden"));
+  document.getElementById("budget-rename-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!renameContext) return;
+    const errEl = document.getElementById("budget-rename-error");
+    errEl.textContent = "";
+    const newName = document.getElementById("budget-rename-input").value.trim();
+    if (!newName) { errEl.textContent = "Nom requis."; return; }
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    try {
+      if (renameContext.type === "artist") {
+        const resp = await callBudgetJSON("/admin/budget/artist/" + encodeURIComponent(currentArtist.fileId) + "/rename", "PUT", { new_artist: newName });
+        currentArtist.artist = resp.artist;
+        currentArtist.fileName = resp.fileName;
+        const idx = ARTISTS.findIndex((a) => a.fileId === currentArtist.fileId);
+        if (idx !== -1) ARTISTS[idx] = currentArtist;
+        renderArtistTabs();
+        toast("Artiste renommé ✅", "ok");
+      } else if (renameContext.type === "project") {
+        const resp = await callBudgetJSON(
+          "/admin/budget/file/" + encodeURIComponent(currentArtist.fileId) + "/projects/" + encodeURIComponent(currentProject) + "/rename",
+          "PUT", { file_name: currentArtist.fileName, new_name: newName }
+        );
+        currentProjects = resp.projects || currentProjects;
+        currentProject = newName;
+        renderProjectTabs();
+        toast("Projet renommé ✅", "ok");
+      } else if (renameContext.type === "sp") {
+        const cat = catByName(renameContext.catName);
+        const sp = cat && cat.sous_postes[renameContext.spIdx];
+        if (sp) {
+          sp.name = newName;
+          markDirty();
+          toast("Sous-poste renommé — n'oublie pas d'enregistrer.", "ok");
+        }
+      }
+      renameOverlay.classList.add("hidden");
+    } catch (err) {
+      errEl.textContent = err.message || "Erreur lors du renommage.";
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
 
   /* ---------------------------- Modale : ajouter un sous-poste ---------------------------- */
   const addSpOverlay = document.getElementById("budget-add-sp-overlay");

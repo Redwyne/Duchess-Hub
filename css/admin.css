@@ -366,6 +366,9 @@ tr.admin-row-selected td { background: var(--accent-soft) !important; }
 .budget-row-nums { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .budget-num { min-width: 84px; text-align: right; font-variant-numeric: tabular-nums; font-size: 13px; }
 .budget-num-ro { color: var(--muted); padding: 7px 4px; }
+/* Réalisé = l'argent réellement dépensé, la donnée la plus regardée — on la
+   distingue volontairement du Prévisionnel (Michel : "plus en avant"). */
+.budget-num-realise { color: var(--text); font-weight: 700; }
 .budget-num-input {
   width: 92px; padding: 6px 8px; border-radius: 8px;
   border: 1px solid var(--border); background: var(--sunken); color: var(--text);
@@ -375,10 +378,30 @@ tr.admin-row-selected td { background: var(--accent-soft) !important; }
 .budget-badge {
   min-width: 52px; padding: 5px 8px; border-radius: 8px; text-align: center;
   font-size: 12px; font-weight: 600; background: var(--sunken); color: var(--muted);
+  cursor: default;
 }
 .budget-pct-ok { background: rgba(46,204,113,.14); color: var(--ok); }
 .budget-pct-warn { background: rgba(255,193,7,.16); color: #ffc107; }
 .budget-pct-over { background: rgba(255,92,92,.14); color: var(--err); }
+
+/* Légende discrète des 3 %, une fois en haut de l'arbre (redondante avec les
+   tooltips title="" sur chaque badge, pour qui n'a pas le réflexe de survoler). */
+.budget-legend {
+  font-size: 11.5px; color: var(--muted); line-height: 1.6;
+  padding: 8px 4px 16px; border-bottom: 1px dashed var(--border); margin-bottom: 16px;
+}
+.budget-legend b { color: var(--text); font-weight: 600; }
+.budget-badge-mini {
+  display: inline-block; padding: 1px 6px; border-radius: 6px;
+  background: var(--sunken); font-weight: 600; color: var(--text); font-size: 11px;
+}
+
+/* Petit ✎ discret pour renommer (artiste actif / projet actif / sous-poste). */
+.budget-rename-pencil {
+  display: inline-block; margin-left: 6px; opacity: .55; cursor: pointer;
+  font-size: 12px; transition: opacity .15s;
+}
+.budget-rename-pencil:hover { opacity: 1; }
 
 .budget-sp {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -392,23 +415,45 @@ tr.admin-row-selected td { background: var(--accent-soft) !important; }
 }
 .budget-sp-name { font-weight: 600; font-size: 13.5px; }
 .budget-sp-simple .budget-sp-name { min-width: 160px; flex-shrink: 0; }
-.budget-sp-simple .budget-dep-fourn { flex: 1; min-width: 120px; }
+.budget-sp-simple .budget-dep-fourn { flex: 0 0 130px; min-width: 0; }
 .budget-sp-simple .budget-row-nums { margin-left: auto; }
 
+/* Petite ligne d'en-tête de colonnes au-dessus des dépenses d'un sous-poste —
+   une seule fois par sous-poste (pas répétée à chaque ligne), pour qu'on sache
+   tout de suite où saisir quoi sans avoir à deviner. */
+.budget-dep-cols {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 4px 16px 2px 52px; font-size: 10px; text-transform: uppercase;
+  letter-spacing: .4px; color: var(--muted);
+}
+.budget-dep-col-label:nth-child(1) { flex: 1.3; min-width: 110px; }
+.budget-dep-col-label:nth-child(2) { flex: 0 0 100px; }
+.budget-dep-col-label:nth-child(3), .budget-dep-col-label:nth-child(4) { width: 92px; text-align: right; }
+.budget-dep-col-realise { color: var(--text); font-weight: 700; }
+
+/* Dépenses : c'est le niveau de saisie le plus fin et le plus consulté — trop
+   discret avant (petit, italique, gris) pour ce que Michel voulait. Police et
+   contraste remontés, le Réalisé (colonne la plus importante) mis en avant. */
 .budget-dep {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 7px 16px 7px 52px; font-size: 12.5px; color: var(--muted);
+  padding: 8px 16px 8px 52px; font-size: 13px; color: var(--text);
   border-top: 1px dashed var(--border);
 }
 .budget-dep-label, .budget-dep-fourn {
-  padding: 6px 9px; border-radius: 8px; border: 1px solid var(--border);
-  background: var(--sunken); color: var(--text); font-size: 12.5px;
+  padding: 7px 9px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--sunken); color: var(--text); font-size: 13px;
 }
-.budget-dep-label { flex: 1.3; min-width: 110px; font-style: italic; }
-.budget-dep-fourn { flex: 1; min-width: 110px; }
+.budget-dep-label { flex: 1.3; min-width: 110px; }
+/* Fournisseur réduit — Michel : "plus petit", ce n'est pas la donnée principale. */
+.budget-dep-fourn { flex: 0 0 100px; min-width: 0; }
 .budget-dep input.dep-previ, .budget-dep input.dep-realise {
-  width: 84px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border);
-  background: var(--sunken); color: var(--text); text-align: right; font-size: 12.5px;
+  width: 92px; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--sunken); color: var(--text); text-align: right; font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.budget-dep-realise-input {
+  font-weight: 700; color: var(--text);
+  background: var(--panel-2); border-color: var(--accent);
 }
 .budget-dep input:focus, .budget-dep-label:focus, .budget-dep-fourn:focus { outline: none; border-color: var(--accent); }
 
@@ -418,5 +463,7 @@ tr.admin-row-selected td { background: var(--accent-soft) !important; }
   .budget-row-nums { justify-content: space-between; }
   .budget-num, .budget-num-input { width: auto; flex: 1; min-width: 0; }
   .budget-dep { padding-left: 16px; }
+  .budget-dep-fourn { flex: 1 1 100%; }
+  .budget-dep-cols { display: none; }
   .budget-summary-bar #budget-save-btn { margin-left: 0; width: 100%; }
 }

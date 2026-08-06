@@ -173,6 +173,7 @@ MAKE_BUDGET_URLS = {
     "list": os.environ.get("MAKE_BUDGET_LIST_URL", ""),
     "download": os.environ.get("MAKE_BUDGET_DOWNLOAD_URL", ""),
     "upload": os.environ.get("MAKE_BUDGET_UPLOAD_URL", ""),
+    "rename": os.environ.get("MAKE_BUDGET_RENAME_URL", ""),
 }
 BUDGET_LOGO_PATH = APP_DIR.parent / "assets" / "logo-white-bg.png"
 
@@ -1566,6 +1567,20 @@ def _budget_logo_path() -> Optional[str]:
     return str(BUDGET_LOGO_PATH) if BUDGET_LOGO_PATH.exists() else None
 
 
+def _budget_rename(item_id: str, new_name: str) -> dict:
+    if not MAKE_BUDGET_URLS["rename"]:
+        raise HTTPException(status_code=500, detail="MAKE_BUDGET_RENAME_URL n'est pas configurée côté serveur (Render > Environment).")
+    try:
+        r = requests.post(MAKE_BUDGET_URLS["rename"], json={"itemId": item_id, "newName": new_name}, timeout=30)
+        r.raise_for_status()
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Erreur de connexion à Make (renommage) : {e}")
+    try:
+        return r.json()
+    except ValueError:
+        return {"raw": r.text}
+
+
 @app.get("/admin/budget/artists")
 async def budget_artists(_ok: bool = Depends(require_admin)):
     files = _budget_list_files()
@@ -1661,6 +1676,47 @@ async def budget_new_project(file_id: str, body: BudgetNewProjectBody, _ok: bool
     new_data = be.workbook_to_bytes(wb)
     upload_result = _budget_upload(body.file_name, new_data)
     return {"created": True, "projects": wb.sheetnames, "upload": upload_result}
+
+
+class BudgetRenameArtistBody(BaseModel):
+    new_artist: str
+
+
+@app.put("/admin/budget/artist/{file_id}/rename")
+async def budget_rename_artist(file_id: str, body: BudgetRenameArtistBody, _ok: bool = Depends(require_admin)):
+    new_artist = (body.new_artist or "").strip()
+    if not new_artist:
+        raise HTTPException(status_code=400, detail="Nouveau nom d'artiste requis.")
+    new_filename = _artist_filename(new_artist)
+    existing = {f.get("name") for f in _budget_list_files() if f.get("id") != file_id}
+    if new_filename in existing:
+        raise HTTPException(status_code=409, detail=f"Un fichier budget existe déjà pour « {new_artist} ».")
+    result = _budget_rename(file_id, new_filename)
+    return {"renamed": True, "artist": new_artist, "fileName": result.get("name") or new_filename}
+
+
+class BudgetRenameProjectBody(BaseModel):
+    file_name: str
+    new_name: str
+
+
+@app.put("/admin/budget/file/{file_id}/projects/{sheet_name}/rename")
+async def budget_rename_project(file_id: str, sheet_name: str, body: BudgetRenameProjectBody, _ok: bool = Depends(require_admin)):
+    new_name = (body.new_name or "").strip()[:31]
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Nouveau nom de projet requis.")
+    data = _budget_download(file_id)
+    wb = be.workbook_from_bytes(data)
+    if sheet_name not in wb.sheetnames:
+        raise HTTPException(status_code=404, detail=f"Projet '{sheet_name}' introuvable.")
+    if new_name != sheet_name and new_name in wb.sheetnames:
+        raise HTTPException(status_code=409, detail=f"Un projet « {new_name} » existe déjà pour cet artiste.")
+    # Renomme uniquement le titre du feuillet (pas de macro/rebuild nécessaire — la structure
+    # et les données du feuillet sont inchangées, seul son nom d'onglet Excel change).
+    wb[sheet_name].title = new_name
+    new_data = be.workbook_to_bytes(wb)
+    upload_result = _budget_upload(body.file_name, new_data)
+    return {"renamed": True, "projects": wb.sheetnames, "upload": upload_result}
 
 
 @app.delete("/admin/budget/file/{file_id}/projects/{sheet_name}")

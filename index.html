@@ -899,6 +899,24 @@
   </div>
 </div>
 
+<!-- Budget : renommer (artiste / projet / sous-poste, modale générique) -->
+<div class="admin-overlay hidden" id="budget-rename-overlay">
+  <div class="admin-modal">
+    <h2 id="budget-rename-title">Renommer</h2>
+    <form id="budget-rename-form">
+      <div class="admin-field">
+        <label id="budget-rename-label">Nouveau nom</label>
+        <input type="text" id="budget-rename-input" required>
+      </div>
+      <div class="admin-error-msg" id="budget-rename-error"></div>
+      <div class="admin-modal-actions">
+        <button type="button" class="admin-btn admin-btn-ghost" id="budget-rename-cancel">Annuler</button>
+        <button type="submit" class="admin-btn admin-btn-primary">Renommer</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- Budget : ajouter un sous-poste -->
 <div class="admin-overlay hidden" id="budget-add-sp-overlay">
   <div class="admin-modal">
