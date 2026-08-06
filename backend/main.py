@@ -62,7 +62,10 @@ RESULTS_DIR = DATA_DIR / "results"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL", "small")
+# "small" produisait trop d'erreurs d'homophones (ex. "il s'aime" au lieu de "ils s'aiment")
+# sur les singles absents du catalogue Flowstage — passé à "medium" (~1.5 Go de RAM en int8,
+# large marge sur le plan Pro Render à 4 Go) à la demande de Michel après un test réel raté.
+WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL", "medium")
 DB_PATH = DATA_DIR / "app.db"
 
 # Clé API Flowstage (app.theflowstage.com/api-keys) — quand elle est renseignée, le backend
@@ -71,6 +74,16 @@ DB_PATH = DATA_DIR / "app.db"
 # faster-whisper. Voir find_flowstage_aesthetic() / get_flowstage_words() plus bas.
 FLOWSTAGE_API_KEY = os.environ.get("FLOWSTAGE_API_KEY", "")
 FLOWSTAGE_BASE_URL = "https://api.theflowstage.com"
+
+# Clé API Anthropic (console.anthropic.com) — quand elle est renseignée, une passe de
+# correction grammaticale/orthographique via Claude est appliquée sur les paroles issues de
+# whisper (JAMAIS sur les paroles Flowstage, déjà vérifiées humainement, ni sur une correction
+# manuelle de Michel dans "Vérifier les paroles"). Corrige les homophones/fautes de transcription
+# ("il s'aime"/"ils s'aiment"...) sans reformuler le style ou l'argot volontaire. Toujours
+# activée dès que la clé est présente — pas d'option par job (décision explicite de Michel :
+# "si je vois que ça crée trop de soucis je l'enlèverai"). Voir correct_lyrics_with_claude().
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+CLAUDE_LYRICS_MODEL = "claude-haiku-4-5-20251001"
 
 # --------------------------------------------------------------------------
 # Stockage distant (Cloudflare R2) — les résultats générés (.srt / .mp4) sont
@@ -448,21 +461,31 @@ def _probe_audio_duration(audio_path: Path) -> float:
         return 0.0
 
 
+_GLUE_CHARS = ("'", "’", "-")
+
+
 def _merge_apostrophe_words(words):
-    """Règle permanente : en français, l'apostrophe n'est jamais un séparateur de mot ("c'est",
-    "s'aiment", "j'aurais" doivent rester UN SEUL mot). faster-whisper peut renvoyer ces
-    contractions comme deux tokens distincts avec leurs propres timestamps (ex. "c'" puis "est")
-    — on les refusionne ici, une bonne fois pour toutes, avant la mise en cache. Comme ce point
-    est appelé sur tous les chemins (whisper ET Flowstage) avant `_cache_timing`, toute la suite
-    (aperçu live, édition manuelle, rendu final) en profite automatiquement."""
+    """Règle permanente : en français, l'apostrophe (et le trait d'union dans un mot composé)
+    ne sont jamais des séparateurs de mot ("c'est", "s'aiment", "j'aurais", "rendez-vous"
+    doivent rester UN SEUL mot). faster-whisper peut renvoyer ces contractions comme deux tokens
+    distincts avec leurs propres timestamps — et pas toujours dans le même sens : parfois le
+    fragment précédent se termine par l'apostrophe ("c'" puis "est"), parfois c'est le fragment
+    suivant qui COMMENCE par elle ("c" puis "'est", constaté en test réel — d'où le bug initial
+    qui ne vérifiait que le premier cas). On fusionne ici dans les deux sens, une bonne fois pour
+    toutes, avant la mise en cache. Comme ce point est appelé sur tous les chemins (whisper ET
+    Flowstage) avant `_cache_timing`, toute la suite (aperçu live, édition manuelle, rendu final)
+    en profite automatiquement."""
     if not words:
         return words
     merged = []
     for w in words:
         text = (w.get("text") or "")
+        stripped = text.strip()
+        starts_with_glue = len(stripped) > 1 and stripped[0] in _GLUE_CHARS
         prev = merged[-1] if merged else None
-        if prev and prev["text"] and prev["text"][-1] in ("'", "’"):
-            prev["text"] += text
+        prev_ends_with_glue = bool(prev and prev["text"] and prev["text"][-1] in _GLUE_CHARS)
+        if prev and (starts_with_glue or prev_ends_with_glue):
+            prev["text"] += stripped
             prev["end"] = w.get("end", prev["end"])
         else:
             merged.append(dict(w))
@@ -476,7 +499,9 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
        automatique — voir find_flowstage_aesthetic / get_flowstage_words). Rejetée si la durée
        de l'audio Flowstage ne colle pas à celle de l'upload (voir get_flowstage_words) — un
        "audio" Flowstage peut n'être qu'un clip partiel du morceau, pas le morceau entier.
-    3. Repli : transcription faster-whisper de l'audio uploadé."""
+    3. Repli : transcription faster-whisper de l'audio uploadé, puis passée à
+       _apply_claude_correction() si ANTHROPIC_API_KEY est configurée (corrige les homophones
+       classiques du français sans jamais toucher au style/argot volontaire)."""
     conn = db()
     row = conn.execute(
         "SELECT timing_json FROM lyrics_timing WHERE single_cle = ? AND granularite = ?",
@@ -498,7 +523,12 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
 
     words = transcribe(audio_path, granularity)
     words = _merge_apostrophe_words(words)
-    _cache_timing(single_cle, granularity, words, "audio_uploade")
+    source = "audio_uploade"
+    corrected = _apply_claude_correction(words, granularity, artiste, titre)
+    if corrected:
+        words = corrected
+        source = "audio_uploade_corrige_claude"
+    _cache_timing(single_cle, granularity, words, source)
     return words
 
 
@@ -523,6 +553,80 @@ def _words_to_phrases(words, gap_threshold: float = 0.4):
         {"text": " ".join(w["text"] for w in p), "start": p[0]["start"], "end": p[-1]["end"]}
         for p in phrases
     ]
+
+
+def correct_lyrics_with_claude(phrases, artiste: str = "", titre: str = ""):
+    """Corrige les fautes de transcription whisper (homophones classiques du français —
+    "il s'aime"/"ils s'aiment", "ces"/"ses"/"c'est"...) via l'API Claude, ligne par ligne, avec
+    tout le contexte du morceau dans le même appel. Ne touche volontairement PAS au style : les
+    lyrics ARK sont urbaines/argot, le langage familier est intentionnel et doit rester tel quel
+    — seule une vraie erreur de transcription doit être corrigée. Renvoie None (repli silencieux
+    sur le texte whisper d'origine, jamais bloquant) si la clé n'est pas configurée, si l'appel
+    échoue, ou si Claude ne renvoie pas exactement le même nombre de lignes qu'en entrée."""
+    if not ANTHROPIC_API_KEY or not phrases:
+        return None
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        numbered = "\n".join(f"{i + 1}. {p['text']}" for i, p in enumerate(phrases))
+        contexte = ""
+        if titre:
+            contexte += f' du morceau "{titre}"'
+        if artiste:
+            contexte += f" de {artiste}"
+        prompt = (
+            "Voici une transcription automatique (whisper) de paroles de chanson"
+            f"{contexte}, ligne par ligne. Elle contient de vraies erreurs de transcription dues "
+            "à des homophones ou imprécisions acoustiques (ex: \"il s'aime\" au lieu de "
+            "\"ils s'aiment\", accords manquants, mots mal entendus).\n\n"
+            "Corrige UNIQUEMENT ce type d'erreur de transcription. Ne reformule PAS le style, "
+            "l'argot, les tournures familières ou les libertés grammaticales volontaires — ce "
+            "sont des paroles de rap/musique urbaine, le langage familier est intentionnel et "
+            "doit être conservé exactement tel quel. En cas de doute entre \"c'est une vraie "
+            "erreur\" et \"c'est juste familier\", NE CORRIGE PAS.\n\n"
+            "Renvoie EXACTEMENT le même nombre de lignes, dans le même ordre, numérotées "
+            "pareil, sans aucun commentaire ni explication avant/après — juste les lignes, "
+            "corrigées ou identiques si rien à corriger.\n\n"
+            f"{numbered}"
+        )
+        resp = client.messages.create(
+            model=CLAUDE_LYRICS_MODEL,
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = resp.content[0].text if resp.content else ""
+        cleaned = [re.sub(r"^\d+[.)]\s*", "", l.strip()) for l in raw.strip().splitlines() if l.strip()]
+        if len(cleaned) != len(phrases):
+            print(f"[Claude] nombre de lignes différent ({len(cleaned)} vs {len(phrases)}) — correction ignorée.")
+            return None
+        return cleaned
+    except Exception as e:  # noqa: BLE001
+        print(f"[Claude] correction échouée: {e}")
+        return None
+
+
+def _apply_claude_correction(words, granularity: str, artiste: str = "", titre: str = ""):
+    """Applique correct_lyrics_with_claude() sur une liste de mots OU de phrases (selon
+    `granularity`) et reconstruit le même format en sortie. Pour la granularité "mot", le
+    timing mot par mot est ré-interpolé à partir des lignes corrigées — exactement la même
+    mécanique que pour les lignes Flowstage (_interpolate_words). Renvoie None si la correction
+    n'a pas pu être appliquée (clé absente, échec API, désaccord de nombre de lignes)."""
+    if not ANTHROPIC_API_KEY or not words:
+        return None
+    phrases = words if granularity == "phrase" else _words_to_phrases(words)
+    if not phrases:
+        return None
+    corrected_texts = correct_lyrics_with_claude(phrases, artiste, titre)
+    if not corrected_texts:
+        return None
+    corrected_phrases = [
+        {"text": t, "start": p["start"], "end": p["end"]}
+        for t, p in zip(corrected_texts, phrases)
+    ]
+    if granularity == "phrase":
+        return corrected_phrases
+    return _interpolate_words(corrected_phrases)
 
 
 # --------------------------------------------------------------------------

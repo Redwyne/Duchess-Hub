@@ -112,18 +112,51 @@ body[data-tab="admin"] {
 }
 .admin-toolbar input { min-width: 220px; flex: 1; }
 
-/* ---- Filtres par colonne ---- */
+/* ---- Filtres par colonne, façon AutoFiltre Excel ---- */
 .admin-filters-panel {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px;
-  padding: 14px; margin-bottom: 14px; background: var(--panel); border: 1px solid var(--border);
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 12px 14px; margin-bottom: 14px; background: var(--panel); border: 1px solid var(--border);
   border-radius: var(--radius-md);
 }
 .admin-filters-panel.hidden { display: none; }
-.admin-filter-item label { display: block; font-size: 10.5px; color: var(--muted-2); font-weight: 600; margin-bottom: 4px; text-transform: uppercase; letter-spacing: .3px; }
-.admin-filters-reset {
-  grid-column: 1 / -1; text-align: right; background: none; border: none; color: var(--accent-2);
-  font-size: 12px; cursor: pointer; text-decoration: underline; font-family: inherit; padding: 2px;
+.admin-colfilter { position: relative; }
+.admin-colfilter-btn {
+  display: flex; align-items: center; gap: 6px; padding: 7px 12px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px;
+  color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--font-body);
 }
+.admin-colfilter-btn.active { border-color: var(--accent); color: var(--accent-2); background: var(--accent-soft); }
+.admin-colfilter-caret { font-size: 9px; color: var(--muted); }
+.admin-colfilter-dropdown {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; width: min(240px, 82vw);
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  box-shadow: 0 16px 36px -8px rgba(0,0,0,.5); padding: 10px; display: flex; flex-direction: column; gap: 8px;
+}
+.admin-colfilter-dropdown.hidden { display: none; }
+.admin-colfilter-search {
+  width: 100%; padding: 7px 10px; background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text); font-size: 13px; font-family: var(--font-body);
+}
+.admin-colfilter-all, .admin-colfilter-item {
+  display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text); cursor: pointer;
+}
+.admin-colfilter-all { font-weight: 700; padding-bottom: 6px; border-bottom: 1px solid var(--border-soft); }
+.admin-colfilter-item input, .admin-colfilter-all input { cursor: pointer; accent-color: var(--accent); flex-shrink: 0; }
+.admin-colfilter-list { max-height: 190px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; padding-right: 2px; }
+.admin-colfilter-item { word-break: break-word; }
+.admin-colfilter-actions { display: flex; justify-content: space-between; align-items: center; padding-top: 6px; border-top: 1px solid var(--border-soft); }
+.admin-colfilter-clear { background: none; border: none; color: var(--muted); font-size: 11.5px; cursor: pointer; text-decoration: underline; font-family: inherit; }
+.admin-colfilter-actions-right { display: flex; gap: 6px; }
+.admin-colfilter-cancel, .admin-colfilter-ok {
+  padding: 6px 12px; border-radius: var(--radius-sm); font-size: 12px; cursor: pointer; border: 1px solid var(--border); font-family: inherit; font-weight: 600;
+}
+.admin-colfilter-cancel { background: none; color: var(--muted); }
+.admin-colfilter-ok { background: var(--accent); border-color: var(--accent); color: #0b0b10; }
+.admin-filters-reset-all {
+  background: none; border: none; color: var(--accent-2); font-size: 12px; cursor: pointer;
+  text-decoration: underline; font-family: inherit; margin-left: auto; padding: 4px;
+}
+.admin-colfilter-empty { color: var(--muted); font-size: 12.5px; }
 
 /* ---- Barre de totaux ---- */
 .admin-stats-bar {
@@ -273,9 +306,11 @@ tr.admin-row-selected td { background: var(--accent-soft) !important; }
 
   /* 16px minimum pour éviter le zoom automatique de Safari iOS au focus. */
   .admin-toolbar input, .admin-toolbar select,
-  .admin-field input, .admin-field select, .admin-field textarea {
+  .admin-field input, .admin-field select, .admin-field textarea,
+  .admin-colfilter-search {
     font-size: 16px;
   }
+  .admin-colfilter-dropdown { width: min(260px, 88vw); }
 
   .admin-topbar { gap: 10px; }
   .admin-topbar h1 { font-size: 19px; }

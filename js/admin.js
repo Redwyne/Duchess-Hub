@@ -206,13 +206,20 @@
     const meta = SHEET_META[name];
     const table = meta.table;
 
+    // On conserve les filtres déjà posés par l'utilisateur d'un rechargement à
+    // l'autre (après un ajout/édition/suppression) — comme dans Excel, un
+    // filtre par colonne reste actif tant qu'on ne l'efface pas explicitement.
+    // La sélection de lignes, elle, est remise à zéro (les index peuvent avoir
+    // changé après une suppression).
+    const prevFilters = (STATE[name] && STATE[name].filters) || {};
+
     try {
       const resp = await callAdmin("list", { table });
       const rows = (resp && resp.value) ? resp.value.map((r) => ({ index: r.index, values: r.values[0] })) : [];
-      STATE[name] = { header: meta.header, table, rows, live: true, filters: {}, selected: new Set() };
+      STATE[name] = { header: meta.header, table, rows, live: true, filters: prevFilters, selected: new Set() };
       document.getElementById("admin-sync-banner").innerHTML = "";
     } catch (err) {
-      STATE[name] = { header: meta.header, table, rows: [], live: false, filters: {}, selected: new Set() };
+      STATE[name] = { header: meta.header, table, rows: [], live: false, filters: prevFilters, selected: new Set() };
       document.getElementById("admin-sync-banner").innerHTML =
         '<div class="admin-banner admin-banner-warn">⚠️ Connexion au fichier OneDrive impossible pour le moment. Remplace <code>DUCHESS_Inventaire.xlsx</code> sur OneDrive par la version restructurée fournie pour activer la synchro en direct (ajout/suppression désactivés en attendant).</div>';
     }
@@ -249,46 +256,145 @@
     return isNaN(n) ? null : n;
   }
 
-  // Colonnes utilisées comme filtre "select" (peu de valeurs distinctes) vs
-  // filtre texte libre (trop de valeurs distinctes pour un menu déroulant).
-  const SELECT_FILTER_MAX_UNIQUE = 14;
+  // ---- Filtres par colonne façon "AutoFiltre" Excel : un bouton par colonne
+  // ouvre une liste à cocher de toutes les valeurs présentes, avec recherche et
+  // "(Tout sélectionner)" — exactement le fonctionnement des flèches de filtre
+  // en haut des tableaux Excel. STATE[name].filters[colName] est un Set des
+  // valeurs à AFFICHER (absent = pas de filtre = tout affiché). Les cellules
+  // vides sont regroupées sous "(Vides)", comme dans Excel.
+  const BLANK_SENTINEL = "__ADMIN_BLANK__";
+
+  function uniqueColValues(name, colName) {
+    const { header, rows } = STATE[name];
+    const idx = idxOf(header, colName);
+    const set = new Set();
+    let hasBlank = false;
+    rows.forEach((r) => {
+      const v = r.values[idx];
+      if (v === null || v === undefined || v === "") hasBlank = true;
+      else set.add(String(v));
+    });
+    const values = [...set].sort((a, b) => a.localeCompare(b, "fr", { numeric: true, sensitivity: "base" }));
+    if (hasBlank) values.push(BLANK_SENTINEL);
+    return values;
+  }
 
   function buildFiltersPanel(name) {
-    const { header, rows, filters } = STATE[name];
+    const { header, filters } = STATE[name];
     const panel = document.getElementById("admin-filters-panel");
     let html = "";
     header.forEach((colName) => {
-      const values = new Set();
-      rows.forEach((r) => { const v = r.values[idxOf(header, colName)]; if (v) values.add(v); });
-      const asSelect = values.size > 0 && values.size <= SELECT_FILTER_MAX_UNIQUE;
-      const cur = filters[colName] || "";
-      html += `<div class="admin-filter-item">`;
-      html += `<label>${escapeHtml(colName)}</label>`;
-      if (asSelect) {
-        html += `<select data-filter-col="${escapeHtml(colName)}"><option value="">Tous</option>`;
-        html += [...values].sort().map((v) => `<option value="${escapeHtml(v)}" ${cur === v ? "selected" : ""}>${escapeHtml(v)}</option>`).join("");
-        html += `</select>`;
-      } else {
-        html += `<input type="text" data-filter-col="${escapeHtml(colName)}" value="${escapeHtml(cur)}" placeholder="Contient…">`;
-      }
-      html += `</div>`;
+      const allValues = uniqueColValues(name, colName);
+      if (allValues.length === 0) return;
+      const active = !!filters[colName];
+      const selected = active ? filters[colName] : new Set(allValues);
+      html += `<div class="admin-colfilter">
+        <button type="button" class="admin-colfilter-btn${active ? " active" : ""}" data-toggle="${escapeHtml(colName)}">
+          <span>${escapeHtml(colName)}</span><span class="admin-colfilter-caret">▾</span>
+        </button>
+        <div class="admin-colfilter-dropdown hidden" data-dropdown="${escapeHtml(colName)}">
+          <input type="text" class="admin-colfilter-search" placeholder="Rechercher…">
+          <label class="admin-colfilter-all"><input type="checkbox" data-select-all ${selected.size === allValues.length ? "checked" : ""}> (Tout sélectionner)</label>
+          <div class="admin-colfilter-list">`;
+      allValues.forEach((v) => {
+        const label = v === BLANK_SENTINEL ? "(Vides)" : v;
+        html += `<label class="admin-colfilter-item"><input type="checkbox" value="${escapeHtml(v)}" ${selected.has(v) ? "checked" : ""}> ${escapeHtml(label)}</label>`;
+      });
+      html += `</div>
+          <div class="admin-colfilter-actions">
+            <button type="button" class="admin-colfilter-clear" data-clear="${escapeHtml(colName)}">Effacer</button>
+            <div class="admin-colfilter-actions-right">
+              <button type="button" class="admin-colfilter-cancel" data-cancel="${escapeHtml(colName)}">Annuler</button>
+              <button type="button" class="admin-colfilter-ok" data-ok="${escapeHtml(colName)}">OK</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
     });
-    html += `<button type="button" class="admin-filters-reset" id="admin-filters-reset">Réinitialiser les filtres</button>`;
-    panel.innerHTML = html;
-    panel.querySelectorAll("[data-filter-col]").forEach((el) => {
-      el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
-        const col = el.getAttribute("data-filter-col");
-        if (el.value) STATE[name].filters[col] = el.value;
-        else delete STATE[name].filters[col];
+    if (Object.keys(filters).length > 0) {
+      html += `<button type="button" class="admin-filters-reset-all" id="admin-filters-reset-all">Réinitialiser tous les filtres</button>`;
+    }
+    panel.innerHTML = html || '<div class="admin-colfilter-empty">Aucune colonne à filtrer sur ce feuillet.</div>';
+
+    panel.querySelectorAll("[data-toggle]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const col = btn.getAttribute("data-toggle");
+        const dd = panel.querySelector(`[data-dropdown="${CSS.escape(col)}"]`);
+        const isOpen = !dd.classList.contains("hidden");
+        panel.querySelectorAll(".admin-colfilter-dropdown").forEach((d) => d.classList.add("hidden"));
+        if (!isOpen) dd.classList.remove("hidden");
+      });
+    });
+
+    panel.querySelectorAll(".admin-colfilter-search").forEach((input) => {
+      input.addEventListener("click", (e) => e.stopPropagation());
+      input.addEventListener("input", () => {
+        const dd = input.closest(".admin-colfilter-dropdown");
+        const q = input.value.trim().toLowerCase();
+        dd.querySelectorAll(".admin-colfilter-item").forEach((label) => {
+          label.style.display = !q || label.textContent.trim().toLowerCase().includes(q) ? "" : "none";
+        });
+      });
+    });
+
+    panel.querySelectorAll("[data-select-all]").forEach((master) => {
+      master.addEventListener("change", () => {
+        const dd = master.closest(".admin-colfilter-dropdown");
+        dd.querySelectorAll(".admin-colfilter-item").forEach((label) => {
+          if (label.style.display === "none") return;
+          label.querySelector("input").checked = master.checked;
+        });
+      });
+    });
+
+    panel.querySelectorAll("[data-ok]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const col = btn.getAttribute("data-ok");
+        const dd = panel.querySelector(`[data-dropdown="${CSS.escape(col)}"]`);
+        const items = [...dd.querySelectorAll(".admin-colfilter-item input")];
+        const checked = items.filter((cb) => cb.checked).map((cb) => cb.value);
+        if (checked.length === 0 || checked.length === items.length) {
+          delete STATE[name].filters[col];
+        } else {
+          STATE[name].filters[col] = new Set(checked);
+        }
+        buildFiltersPanel(name);
         renderSheet(name);
       });
     });
-    document.getElementById("admin-filters-reset").addEventListener("click", () => {
-      STATE[name].filters = {};
-      buildFiltersPanel(name);
-      renderSheet(name);
+
+    panel.querySelectorAll("[data-cancel]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        panel.querySelector(`[data-dropdown="${CSS.escape(btn.getAttribute("data-cancel"))}"]`).classList.add("hidden");
+      });
     });
+
+    panel.querySelectorAll("[data-clear]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        delete STATE[name].filters[btn.getAttribute("data-clear")];
+        buildFiltersPanel(name);
+        renderSheet(name);
+      });
+    });
+
+    const resetAllBtn = document.getElementById("admin-filters-reset-all");
+    if (resetAllBtn) {
+      resetAllBtn.addEventListener("click", () => {
+        STATE[name].filters = {};
+        buildFiltersPanel(name);
+        renderSheet(name);
+      });
+    }
   }
+
+  // Ferme n'importe quel menu de filtre ouvert dès qu'on clique ailleurs.
+  document.addEventListener("click", (e) => {
+    const panel = document.getElementById("admin-filters-panel");
+    if (panel && !panel.contains(e.target)) {
+      panel.querySelectorAll(".admin-colfilter-dropdown").forEach((d) => d.classList.add("hidden"));
+    }
+  });
 
   document.getElementById("admin-toggle-filters").addEventListener("click", () => {
     document.getElementById("admin-filters-panel").classList.toggle("hidden");
@@ -301,16 +407,11 @@
     const search = document.getElementById("admin-search-input").value.trim().toLowerCase();
     return rows.filter((r) => {
       for (const colName in filters) {
-        const val = filters[colName];
+        const allowed = filters[colName];
         const colIdx = idxOf(header, colName);
-        const cellVal = r.values[colIdx];
-        const asSelectSet = document.querySelector(`[data-filter-col="${CSS.escape(colName)}"]`);
-        const isSelect = asSelectSet && asSelectSet.tagName === "SELECT";
-        if (isSelect) {
-          if (cellVal !== val) return false;
-        } else {
-          if (!String(cellVal || "").toLowerCase().includes(val.toLowerCase())) return false;
-        }
+        const raw = r.values[colIdx];
+        const cellKey = (raw === null || raw === undefined || raw === "") ? BLANK_SENTINEL : String(raw);
+        if (!allowed.has(cellKey)) return false;
       }
       if (search) {
         const hay = r.values.map((v) => (v === null || v === undefined) ? "" : String(v)).join(" ").toLowerCase();
@@ -675,12 +776,21 @@
     return [header, ...rows.map((r) => header.map((c, i) => r.values[i] ?? ""))];
   }
 
+  // Horodatage lisible et compatible noms de fichiers (pas de ":" ni "/"),
+  // ex. "06-08-2026 14h32" — inséré dans chaque fichier exporté pour que
+  // Michel sache exactement quand la photo de l'inventaire a été prise.
+  function exportTimestamp() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${d.getFullYear()} ${pad(d.getHours())}h${pad(d.getMinutes())}`;
+  }
+
   function exportRowsXlsx(name, rows, suffix) {
     const aoa = rowsToAOA(name, rows);
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
-    XLSX.writeFile(wb, `${name} - ${suffix}.xlsx`);
+    XLSX.writeFile(wb, `${name} - ${suffix} - ${exportTimestamp()}.xlsx`);
   }
 
   function exportRowsTxt(name, rows, suffix) {
@@ -691,7 +801,7 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${name} - ${suffix}.txt`;
+    a.download = `${name} - ${suffix} - ${exportTimestamp()}.txt`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -746,6 +856,25 @@
   });
 
   /* ---------------------------- Actions groupées ---------------------------- */
+  // Exécute `worker` sur chaque élément de `items` avec au plus `limit` appels
+  // Make/Graph en vol simultanément (au lieu d'un aller-retour après l'autre).
+  // `onProgress(done, total)` permet d'afficher une progression pendant que ça
+  // tourne, pour que le bouton ne paraisse jamais figé.
+  async function runWithConcurrency(items, worker, limit, onProgress) {
+    let done = 0;
+    let cursor = 0;
+    async function runNext() {
+      while (cursor < items.length) {
+        const i = cursor++;
+        await worker(items[i], i);
+        done++;
+        if (onProgress) onProgress(done, items.length);
+      }
+    }
+    const pool = Array.from({ length: Math.min(limit, items.length) }, runNext);
+    await Promise.all(pool);
+  }
+
   document.getElementById("admin-bulk-clear").addEventListener("click", () => {
     STATE[currentSheet].selected.clear();
     renderSheet(currentSheet);
@@ -757,17 +886,27 @@
     if (sel.length === 0) return;
     if (!confirm(`Supprimer ${sel.length} élément${sel.length > 1 ? "s" : ""} ? Cette action modifie directement le fichier Excel sur OneDrive.`)) return;
     if (!STATE[name].live) { toast("Synchro OneDrive indisponible pour le moment.", "err"); return; }
+    const btn = document.getElementById("admin-bulk-delete");
+    const originalText = btn.textContent;
+    btn.disabled = true;
     // Index décroissants : chaque suppression décale les index suivants vers
-    // le bas, donc il faut toujours supprimer du plus grand index au plus petit.
+    // le bas, donc il faut toujours supprimer du plus grand index au plus petit —
+    // ça doit rester séquentiel (pas de parallélisation possible ici sans
+    // risquer de supprimer la mauvaise ligne).
     const sortedDesc = sel.sort((a, b) => b - a);
     try {
+      let done = 0;
       for (const idx of sortedDesc) {
         await callAdmin("delete", { table: STATE[name].table, index: idx });
+        done++;
+        btn.textContent = `🗑 Suppression… (${done}/${sortedDesc.length})`;
       }
       toast(`${sel.length} élément${sel.length > 1 ? "s" : ""} supprimé${sel.length > 1 ? "s" : ""} 🗑`, "ok");
     } catch (err) {
       toast("Erreur : " + (err.message || "suppression impossible"), "err");
     } finally {
+      btn.textContent = originalText;
+      btn.disabled = false;
       STATE[name].selected.clear();
       await loadSheet(name);
     }
@@ -779,14 +918,20 @@
     if (sel.length === 0) return;
     if (!STATE[name].live) { toast("Synchro OneDrive indisponible pour le moment.", "err"); return; }
     const rowsToDup = STATE[name].rows.filter((r) => sel.includes(r.index));
+    const btn = document.getElementById("admin-bulk-duplicate");
+    const originalText = btn.textContent;
+    btn.disabled = true;
     try {
-      for (const r of rowsToDup) {
-        await callAdmin("add", { table: STATE[name].table, values: [r.values] });
-      }
+      // L'ordre n'a pas d'importance pour un ajout (contrairement à la
+      // suppression) : on peut donc paralléliser pour aller nettement plus vite.
+      await runWithConcurrency(rowsToDup, (r) => callAdmin("add", { table: STATE[name].table, values: [r.values] }), 4,
+        (done, total) => { btn.textContent = `📄 Duplication… (${done}/${total})`; });
       toast(`${rowsToDup.length} élément${rowsToDup.length > 1 ? "s" : ""} dupliqué${rowsToDup.length > 1 ? "s" : ""} ✅`, "ok");
     } catch (err) {
       toast("Erreur : " + (err.message || "duplication impossible"), "err");
     } finally {
+      btn.textContent = originalText;
+      btn.disabled = false;
       STATE[name].selected.clear();
       await loadSheet(name);
     }
@@ -822,15 +967,20 @@
     const colIdx = parseInt(document.getElementById("admin-bulk-edit-field").value);
     const newVal = document.getElementById("admin-bulk-edit-value").value;
     const btn = e.target.querySelector('button[type="submit"]');
+    const originalText = btn ? btn.textContent : "";
     if (btn) btn.disabled = true;
     try {
-      for (const idx of sel) {
+      // Modifier une ligne existante ne déplace aucun index (contrairement à
+      // une suppression) : chaque appel est indépendant, donc on les envoie en
+      // parallèle (par petits paquets) au lieu d'attendre un aller-retour
+      // Make/Graph après l'autre — c'est ça qui rendait "Appliquer" si long.
+      await runWithConcurrency(sel, async (idx) => {
         const row = STATE[name].rows.find((r) => r.index === idx);
-        if (!row) continue;
+        if (!row) return;
         const values = row.values.slice();
         values[colIdx] = newVal === "" ? null : newVal;
         await callAdmin("update", { table: STATE[name].table, index: idx, values: [values] });
-      }
+      }, 4, (done, total) => { if (btn) btn.textContent = `Application… (${done}/${total})`; });
       toast(`${sel.length} élément${sel.length > 1 ? "s" : ""} modifié${sel.length > 1 ? "s" : ""} ✅`, "ok");
       bulkEditOverlay.classList.add("hidden");
       STATE[name].selected.clear();
@@ -838,7 +988,7 @@
     } catch (err) {
       errEl.textContent = err.message || "Erreur lors de la modification groupée.";
     } finally {
-      if (btn) btn.disabled = false;
+      if (btn) { btn.disabled = false; btn.textContent = originalText; }
     }
   });
 })();
