@@ -384,9 +384,13 @@
   function renderSteps(steps, data) {
     progressSteps.innerHTML = "";
     let doneCount = 0;
-    steps.forEach((s) => { if (data && data[s.key] === true) doneCount++; });
+    // SQLite stocke ces colonnes en INTEGER (0/1), pas en booléen — le JSON renvoyé par le
+    // backend porte donc des nombres, pas des `true`/`false`. Une comparaison stricte à `true`
+    // ne matchait jamais (1 === true est faux en JS), ce qui bloquait la barre à 0% et
+    // empêchait le bloc résultat/téléchargement de s'afficher même quand le job était fini.
+    steps.forEach((s) => { if (data && !!data[s.key]) doneCount++; });
     steps.forEach((s, i) => {
-      const isDone = data && data[s.key] === true;
+      const isDone = data && !!data[s.key];
       const isActive = !isDone && i === doneCount;
       const div = document.createElement("div");
       div.className = "progress-step" + (isDone ? " done" : "") + (isActive ? " active" : "");
