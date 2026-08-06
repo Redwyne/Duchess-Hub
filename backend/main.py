@@ -524,7 +524,21 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
     ).fetchone()
     conn.close()
     if row:
-        return json.loads(row["timing_json"]), (row["source_audio"] or "cache")
+        words = json.loads(row["timing_json"])
+        source = row["source_audio"] or "cache"
+        # Upgrade paresseux : une entrée déjà en cache en "audio_uploade" (whisper brut, jamais
+        # corrigé — soit un cache antérieur à l'ajout de la correction Claude, soit une tentative
+        # de correction qui avait échoué à l'époque) est retentée maintenant si une clé Anthropic
+        # est disponible, au lieu de servir indéfiniment le même texte non corrigé. Sans ça, un
+        # single déjà transcrit une fois avant ce fix restait bloqué en whisper brut pour toujours,
+        # même après un redéploiement avec la correction Claude qui fonctionne.
+        if source == "audio_uploade" and ANTHROPIC_API_KEY:
+            corrected = _apply_claude_correction(words, granularity, artiste, titre)
+            if corrected:
+                words = corrected
+                source = "audio_uploade_corrige_claude"
+                _cache_timing(single_cle, granularity, words, source)
+        return words, source
 
     if FLOWSTAGE_API_KEY:
         aesthetic = find_flowstage_aesthetic(artiste, titre)
