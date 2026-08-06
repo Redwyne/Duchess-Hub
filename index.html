@@ -515,6 +515,9 @@
           <div class="field">
             <label>Vérifier les paroles <span class="hl" style="font-weight:600;">corrige avant de générer</span></label>
             <div class="hint" id="srt-verifyHint">Choisis d'abord un fichier.</div>
+            <div class="progress-track verify-loadbar" id="srt-verifyLoadbar" style="display:none;">
+              <div class="progress-fill indeterminate"></div>
+            </div>
           </div>
 
           <div class="verify-player">
@@ -533,10 +536,15 @@
             <button type="button" class="verify-btn" id="srt-bulkApply">Remplacer partout</button>
           </div>
 
-          <div class="verify-words" id="srt-verifyWords"></div>
+          <div class="verify-words" id="srt-verifyWords">
+            <div class="verify-text-cursor" id="srt-verifyTextCursor"></div>
+          </div>
 
           <div class="verify-actions">
-            <button type="button" class="verify-btn" id="srt-verifyReset">Annuler mes corrections</button>
+            <div class="verify-actions-left">
+              <button type="button" class="verify-btn" id="srt-verifyAddWord">+ Ajouter un mot</button>
+              <button type="button" class="verify-btn" id="srt-verifyReset">Annuler mes corrections</button>
+            </div>
             <span class="verify-status" id="srt-verifyStatus"></span>
           </div>
 
@@ -788,18 +796,62 @@
     <div class="admin-main">
       <div class="admin-topbar">
         <h1>📦 Inventaire</h1>
-        <button class="admin-btn admin-btn-primary admin-btn-sm" id="admin-add-row">+ Ajouter un élément</button>
+        <button class="admin-btn admin-btn-primary admin-btn-add" id="admin-add-row">✚ Ajouter un élément</button>
       </div>
       <div id="admin-sync-banner"></div>
       <div class="admin-sheet-tabs" id="admin-sheet-tabs"></div>
       <div class="admin-toolbar">
         <input type="text" id="admin-search-input" placeholder="Rechercher (nom, code article, fournisseur...)">
-        <select id="admin-filter-etat"><option value="">Tous les états</option></select>
+        <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-toggle-filters">🔍 Filtres</button>
+        <div class="admin-export-wrap">
+          <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-export-btn">⬇ Exporter</button>
+          <div class="admin-export-menu hidden" id="admin-export-menu">
+            <button type="button" data-export-format="xlsx">📊 Excel (.xlsx)</button>
+            <button type="button" data-export-format="txt">📄 Texte (.txt)</button>
+          </div>
+        </div>
+      </div>
+      <div class="admin-filters-panel hidden" id="admin-filters-panel"></div>
+      <div class="admin-stats-bar" id="admin-stats-bar"></div>
+      <div class="admin-bulk-bar hidden" id="admin-bulk-bar">
+        <span id="admin-bulk-count">0 sélectionné(s)</span>
+        <div class="admin-bulk-actions">
+          <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-bulk-clear">Désélectionner</button>
+          <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-bulk-edit">✎ Modifier un champ</button>
+          <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-bulk-duplicate">📄 Dupliquer</button>
+          <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-bulk-export">⬇ Exporter</button>
+          <button type="button" class="admin-btn admin-btn-danger admin-btn-sm" id="admin-bulk-delete">🗑 Supprimer</button>
+        </div>
       </div>
       <div id="admin-content"></div>
     </div>
   </div>
 
+  <button type="button" class="admin-fab hidden" id="admin-add-row-fab" title="Ajouter un élément" aria-label="Ajouter un élément">✚</button>
+
+</div>
+
+<!-- Bulk edit popup -->
+<div class="admin-overlay hidden" id="admin-bulk-edit-overlay">
+  <div class="admin-modal">
+    <h2>Modifier un champ en masse</h2>
+    <div class="admin-modal-sub" id="admin-bulk-edit-sub"></div>
+    <form id="admin-bulk-edit-form">
+      <div class="admin-field">
+        <label>Champ à modifier</label>
+        <select id="admin-bulk-edit-field"></select>
+      </div>
+      <div class="admin-field">
+        <label>Nouvelle valeur</label>
+        <input type="text" id="admin-bulk-edit-value">
+      </div>
+      <div class="admin-error-msg" id="admin-bulk-edit-error"></div>
+      <div class="admin-modal-actions">
+        <button type="button" class="admin-btn admin-btn-ghost" id="admin-bulk-edit-cancel">Annuler</button>
+        <button type="submit" class="admin-btn admin-btn-primary">Appliquer</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <!-- Login popup -->
@@ -856,6 +908,7 @@
 
 <div class="admin-toast-container" id="admin-toast-container"></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="js/theme.js"></script>
 <script src="js/tabs.js"></script>
 <script src="js/shared.js"></script>

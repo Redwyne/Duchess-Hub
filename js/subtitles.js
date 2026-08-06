@@ -44,6 +44,7 @@
 
   const verifyBlock = document.getElementById("srt-verifyBlock");
   const verifyHint = document.getElementById("srt-verifyHint");
+  const verifyLoadbar = document.getElementById("srt-verifyLoadbar");
   const verifyPlayBtn = document.getElementById("srt-verifyPlay");
   const waveCanvas = document.getElementById("srt-waveCanvas");
   const verifyPlayhead = document.getElementById("srt-verifyPlayhead");
@@ -52,6 +53,8 @@
   const bulkTo = document.getElementById("srt-bulkTo");
   const bulkApplyBtn = document.getElementById("srt-bulkApply");
   const verifyWordsEl = document.getElementById("srt-verifyWords");
+  const verifyTextCursor = document.getElementById("srt-verifyTextCursor");
+  const verifyAddWordBtn = document.getElementById("srt-verifyAddWord");
   const verifyResetBtn = document.getElementById("srt-verifyReset");
   const verifyStatus = document.getElementById("srt-verifyStatus");
   const verifyAudio = document.getElementById("srt-verifyAudio");
@@ -159,6 +162,7 @@
     if (!file) return;
     selectedFile = file;
     dzFile.textContent = file.name + " · " + (file.size / (1024 * 1024)).toFixed(1) + " Mo";
+    dropzone.classList.add("has-file"); // masque "glisse ton fichier ici" une fois un fichier choisi
 
     resetRealPreview();
     if (previewObjectUrl) { URL.revokeObjectURL(previewObjectUrl); previewObjectUrl = null; }
@@ -181,6 +185,7 @@
     // elle ne dépend pas d'avoir choisi "Vidéo sous-titrée".
     verifyBlock.style.display = "";
     verifyHint.textContent = "Analyse des paroles en cours…";
+    verifyLoadbar.style.display = "";
     verifyWordsEl.innerHTML = "";
     drawWaveform();
     schedulePreviewJob();
@@ -509,6 +514,7 @@
     resetRealPreview();
     previewCaption.textContent = "Analyse des paroles en cours…";
     verifyHint.textContent = "Analyse des paroles en cours…";
+    verifyLoadbar.style.display = "";
 
     const jobId = uuid();
     previewJobId = jobId;
@@ -537,6 +543,7 @@
         previewPollTimer = null;
         previewCaption.textContent = "Aperçu texte (analyse indisponible)";
         verifyHint.textContent = "Analyse indisponible — réessaie plus tard.";
+        verifyLoadbar.style.display = "none";
         return;
       }
       try {
@@ -548,6 +555,7 @@
           previewPollTimer = null;
           previewCaption.textContent = "Aperçu texte (analyse indisponible)";
           verifyHint.textContent = "Analyse indisponible : " + data.error_message;
+          verifyLoadbar.style.display = "none";
           return;
         }
         if (data.words_json) {
@@ -677,6 +685,7 @@
     editedWords = words.map((w) => ({ text: w.text, start: w.start, end: w.end }));
     verifyHint.textContent = "";
     verifyStatus.textContent = "";
+    verifyLoadbar.style.display = "none";
     renderVerifyWords();
   }
 
@@ -690,16 +699,42 @@
   // Seuil de silence (secondes) au-delà duquel on considère qu'une nouvelle phrase/ligne
   // commence — même heuristique que _words_to_phrases() côté backend, pour que le regroupement
   // visuel colle à ce qui sera utilisé pour le mode "Phrase entière"/l'export .srt.
-  const VERIFY_LINE_GAP = 0.6;
+  const VERIFY_LINE_GAP = 0.4;
+
+  function insertWordAfter(afterIdx) {
+    const prev = editedWords[afterIdx];
+    const next = editedWords[afterIdx + 1];
+    const gapStart = prev ? prev.end : 0;
+    const gapEnd = next ? next.start : gapStart + 0.6;
+    const dur = Math.min(0.4, Math.max(0.15, (gapEnd - gapStart) * 0.6 || 0.3));
+    const start = gapStart + Math.max(0, (gapEnd - gapStart - dur) / 2);
+    editedWords.splice(afterIdx + 1, 0, { text: "nouveau", start, end: start + dur });
+    renderVerifyWords();
+    verifyStatus.textContent = "Mot ajouté — modifie son texte ✓";
+    syncEditsToPreview();
+    const chip = verifyWordsEl.querySelector('.verify-word[data-index="' + (afterIdx + 1) + '"]');
+    if (chip) editWordChip(chip, afterIdx + 1);
+  }
 
   function renderVerifyWords() {
     verifyWordsEl.innerHTML = "";
-    if (!editedWords || !editedWords.length) return;
+    if (!editedWords || !editedWords.length) {
+      const addBtn = document.createElement("button");
+      addBtn.type = "button";
+      addBtn.className = "verify-word-add";
+      addBtn.textContent = "+ Ajouter un mot";
+      addBtn.addEventListener("click", () => insertWordAfter(-1));
+      verifyWordsEl.appendChild(addBtn);
+      verifyWordsEl.appendChild(verifyTextCursor);
+      return;
+    }
     let lineEl = null;
     let lineIdx = -1;
+    let lastIdxInLine = -1;
     editedWords.forEach((w, i) => {
       const isNewLine = i === 0 || (w.start - editedWords[i - 1].end) > VERIFY_LINE_GAP;
       if (isNewLine) {
+        if (lineEl) appendLineAddButton(lineEl, lastIdxInLine);
         lineIdx++;
         lineEl = document.createElement("div");
         lineEl.className = "verify-line verify-line-" + (lineIdx % 6);
@@ -735,7 +770,20 @@
         syncEditsToPreview();
       });
       lineEl.appendChild(chip);
+      lastIdxInLine = i;
     });
+    if (lineEl) appendLineAddButton(lineEl, lastIdxInLine);
+    verifyWordsEl.appendChild(verifyTextCursor);
+  }
+
+  function appendLineAddButton(lineEl, afterIdx) {
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "verify-word-add";
+    addBtn.textContent = "+";
+    addBtn.title = "Ajouter un mot à la fin de cette ligne";
+    addBtn.addEventListener("click", () => insertWordAfter(afterIdx));
+    lineEl.appendChild(addBtn);
   }
 
   function editWordChip(chip, i) {
@@ -836,6 +884,11 @@
     verifyStatus.textContent = "Corrections annulées.";
   });
 
+  verifyAddWordBtn.addEventListener("click", () => {
+    if (!editedWords) return;
+    insertWordAfter(editedWords.length - 1);
+  });
+
   // --- Lecteur audio + waveform -------------------------------------------------------------
 
   verifyPlayBtn.addEventListener("click", () => {
@@ -911,6 +964,28 @@
 
   window.addEventListener("resize", () => { if (selectedFile) drawWaveform(); });
 
+  function positionVerifyTextCursor(idx, t) {
+    if (idx < 0 || !editedWords || !editedWords[idx]) {
+      verifyTextCursor.style.display = "none";
+      return;
+    }
+    const chip = verifyWordsEl.querySelector('.verify-word[data-index="' + idx + '"]');
+    if (!chip) { verifyTextCursor.style.display = "none"; return; }
+    const w = editedWords[idx];
+    // Balaie le mot actif de gauche à droite au rythme de sa propre durée ; si on est dans le
+    // silence après ce mot (avant le suivant), le curseur reste figé à la fin du mot plutôt que
+    // de sauter dans le vide.
+    const dur = Math.max(0.05, w.end - w.start);
+    const frac = Math.max(0, Math.min(1, (t - w.start) / dur));
+    // offsetLeft/offsetTop d'un mot dans une .verify-line (position statique) remontent
+    // directement à .verify-words, qui est le containing block positionné (position: relative).
+    const x = chip.offsetLeft + chip.offsetWidth * frac;
+    verifyTextCursor.style.display = "block";
+    verifyTextCursor.style.left = x + "px";
+    verifyTextCursor.style.top = chip.offsetTop + "px";
+    verifyTextCursor.style.height = chip.offsetHeight + "px";
+  }
+
   let lastVerifyWordIdx = -1;
   function verifyTick() {
     if (verifyAudio.duration) {
@@ -932,6 +1007,9 @@
           if (el) { el.classList.add("playing"); el.scrollIntoView({ block: "nearest", inline: "nearest" }); }
         }
       }
+      positionVerifyTextCursor(idx, t);
+    } else {
+      verifyTextCursor.style.display = "none";
     }
     requestAnimationFrame(verifyTick);
   }

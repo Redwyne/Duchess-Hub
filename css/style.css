@@ -1125,6 +1125,14 @@ textarea { resize: vertical; min-height: 76px; }
 .dz-text { font-size: 13.5px; color: var(--muted); }
 .dz-file { margin-top: 10px; font-size: 13px; font-weight: 600; color: var(--text); word-break: break-all; }
 
+/* Une fois un fichier choisi, le texte d'invite ("glisse ton fichier ici...") ne sert plus à
+   rien — seul le nom du fichier reste affiché. Cliquer sur la zone permet toujours d'en choisir
+   un autre. */
+.dropzone.has-file .dz-icon,
+.dropzone.has-file .dz-text { display: none; }
+.dropzone.has-file { padding: 18px 16px; }
+.dropzone.has-file .dz-file { margin-top: 0; }
+
 .style-block { margin-bottom: 8px; }
 
 .preset-row {
@@ -1361,7 +1369,10 @@ input[type="color"] {
 }
 .verify-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
 
+.verify-loadbar { margin: 10px 0 0; }
+
 .verify-words {
+  position: relative; /* containing block pour .verify-text-cursor + repère offsetLeft/offsetTop des mots */
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1371,7 +1382,7 @@ input[type="color"] {
   margin-bottom: 12px;
 }
 
-/* Une ligne = une phrase détectée (silence > 0.6s entre deux mots, même heuristique que
+/* Une ligne = une phrase détectée (silence > 0.4s entre deux mots, même heuristique que
    _words_to_phrases() côté backend) — inspiré du regroupement par ligne coloré de l'éditeur
    Flowstage ("Line build preview"). */
 .verify-line {
@@ -1415,6 +1426,37 @@ input[type="color"] {
   border-radius: 8px !important;
 }
 
+/* Bouton "+" d'insertion — un par ligne (ajoute à la fin de cette phrase) + un état plein
+   texte quand il n'y a plus aucun mot (tous supprimés). */
+.verify-word-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 8px;
+  border: 1.5px dashed var(--border);
+  background: transparent;
+  color: var(--muted-2);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color .12s, color .12s;
+}
+.verify-word-add:hover { border-color: var(--accent); color: var(--accent-2); }
+
+/* Curseur vertical qui balaie le mot en cours de lecture, au rythme de la musique. */
+.verify-text-cursor {
+  position: absolute;
+  width: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  pointer-events: none;
+  display: none;
+  top: 0;
+  left: 0;
+}
+
 .verify-actions {
   display: flex;
   align-items: center;
@@ -1422,6 +1464,7 @@ input[type="color"] {
   gap: 12px;
   flex-wrap: wrap;
 }
+.verify-actions-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .verify-status { font-size: 12px; color: var(--ok); }
 
 /* Effets d'apparition — aperçu uniquement (le rendu réel utilise les tags ASS équivalents,

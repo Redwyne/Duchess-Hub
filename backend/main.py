@@ -448,6 +448,27 @@ def _probe_audio_duration(audio_path: Path) -> float:
         return 0.0
 
 
+def _merge_apostrophe_words(words):
+    """Règle permanente : en français, l'apostrophe n'est jamais un séparateur de mot ("c'est",
+    "s'aiment", "j'aurais" doivent rester UN SEUL mot). faster-whisper peut renvoyer ces
+    contractions comme deux tokens distincts avec leurs propres timestamps (ex. "c'" puis "est")
+    — on les refusionne ici, une bonne fois pour toutes, avant la mise en cache. Comme ce point
+    est appelé sur tous les chemins (whisper ET Flowstage) avant `_cache_timing`, toute la suite
+    (aperçu live, édition manuelle, rendu final) en profite automatiquement."""
+    if not words:
+        return words
+    merged = []
+    for w in words:
+        text = (w.get("text") or "")
+        prev = merged[-1] if merged else None
+        if prev and prev["text"] and prev["text"][-1] in ("'", "’"):
+            prev["text"] += text
+            prev["end"] = w.get("end", prev["end"])
+        else:
+            merged.append(dict(w))
+    return merged
+
+
 def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artiste: str = "", titre: str = ""):
     """Source des paroles timées, par ordre de préférence :
     1. Cache local (déjà généré une fois, peu importe la source d'origine).
@@ -471,15 +492,17 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
             expected_duration = _probe_audio_duration(audio_path)
             words = get_flowstage_words(aesthetic["id"], granularity, expected_duration_s=expected_duration)
             if words:
+                words = _merge_apostrophe_words(words)
                 _cache_timing(single_cle, granularity, words, "flowstage")
                 return words
 
     words = transcribe(audio_path, granularity)
+    words = _merge_apostrophe_words(words)
     _cache_timing(single_cle, granularity, words, "audio_uploade")
     return words
 
 
-def _words_to_phrases(words, gap_threshold: float = 0.6):
+def _words_to_phrases(words, gap_threshold: float = 0.4):
     """Reconstruit des "phrases" (comme la granularité "phrase") à partir d'une liste de MOTS —
     utilisé quand l'utilisateur a corrigé les paroles dans l'éditeur de vérification (§ Vérifier
     les paroles), qui travaille toujours au niveau mot, mais que le mode "Phrase entière" ou

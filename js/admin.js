@@ -70,11 +70,15 @@
     dashboard.classList.add("active");
     initSheetTabs();
     loadSheet(currentSheet);
+    const fab = document.getElementById("admin-add-row-fab");
+    if (fab) fab.classList.remove("hidden");
   }
 
   function leaveToGate() {
     dashboard.classList.remove("active");
     gate.style.display = "";
+    const fab = document.getElementById("admin-add-row-fab");
+    if (fab) fab.classList.add("hidden");
   }
 
   /* Remember which tab we came from, so Cancel / not-logged-in returns there
@@ -205,14 +209,14 @@
     try {
       const resp = await callAdmin("list", { table });
       const rows = (resp && resp.value) ? resp.value.map((r) => ({ index: r.index, values: r.values[0] })) : [];
-      STATE[name] = { header: meta.header, table, rows, live: true };
+      STATE[name] = { header: meta.header, table, rows, live: true, filters: {}, selected: new Set() };
       document.getElementById("admin-sync-banner").innerHTML = "";
     } catch (err) {
-      STATE[name] = { header: meta.header, table, rows: [], live: false };
+      STATE[name] = { header: meta.header, table, rows: [], live: false, filters: {}, selected: new Set() };
       document.getElementById("admin-sync-banner").innerHTML =
         '<div class="admin-banner admin-banner-warn">⚠️ Connexion au fichier OneDrive impossible pour le moment. Remplace <code>DUCHESS_Inventaire.xlsx</code> sur OneDrive par la version restructurée fournie pour activer la synchro en direct (ajout/suppression désactivés en attendant).</div>';
     }
-    populateEtatFilter(name);
+    buildFiltersPanel(name);
     renderSheet(name);
   }
 
@@ -233,34 +237,118 @@
     return "admin-pill-neutral";
   }
 
-  function populateEtatFilter(name) {
-    const { header, rows } = STATE[name];
-    const etatIdx = idxOf(header, "État");
-    const sel = document.getElementById("admin-filter-etat");
-    const cur = sel.value;
-    const values = new Set();
-    rows.forEach((r) => { const v = r.values[etatIdx]; if (v) values.add(v); });
-    sel.innerHTML = '<option value="">Tous les états</option>' +
-      [...values].sort().map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
-    sel.value = [...values].includes(cur) ? cur : "";
+  // Colonnes considérées numériques pour le calcul des totaux — détection par
+  // nom (Prix/Nombre/Quantité), pas par contenu, pour rester stable même sur
+  // un feuillet vide.
+  function isNumericCol(colName) {
+    return /prix|nombre|quantit/i.test(colName);
+  }
+  function parseNum(v) {
+    if (v === null || v === undefined || v === "") return null;
+    const n = parseFloat(String(v).replace(",", ".").replace(/[^\d.\-]/g, ""));
+    return isNaN(n) ? null : n;
   }
 
-  function renderSheet(name) {
-    const { header, rows } = STATE[name];
-    const catIdx = idxOf(header, "Catégorie");
-    const search = document.getElementById("admin-search-input").value.trim().toLowerCase();
-    const etatFilter = document.getElementById("admin-filter-etat").value;
-    const etatIdx = idxOf(header, "État");
-    const displayCols = header.filter((h) => h !== "Catégorie");
+  // Colonnes utilisées comme filtre "select" (peu de valeurs distinctes) vs
+  // filtre texte libre (trop de valeurs distinctes pour un menu déroulant).
+  const SELECT_FILTER_MAX_UNIQUE = 14;
 
-    let filtered = rows.filter((r) => {
-      if (etatFilter && r.values[etatIdx] !== etatFilter) return false;
+  function buildFiltersPanel(name) {
+    const { header, rows, filters } = STATE[name];
+    const panel = document.getElementById("admin-filters-panel");
+    let html = "";
+    header.forEach((colName) => {
+      const values = new Set();
+      rows.forEach((r) => { const v = r.values[idxOf(header, colName)]; if (v) values.add(v); });
+      const asSelect = values.size > 0 && values.size <= SELECT_FILTER_MAX_UNIQUE;
+      const cur = filters[colName] || "";
+      html += `<div class="admin-filter-item">`;
+      html += `<label>${escapeHtml(colName)}</label>`;
+      if (asSelect) {
+        html += `<select data-filter-col="${escapeHtml(colName)}"><option value="">Tous</option>`;
+        html += [...values].sort().map((v) => `<option value="${escapeHtml(v)}" ${cur === v ? "selected" : ""}>${escapeHtml(v)}</option>`).join("");
+        html += `</select>`;
+      } else {
+        html += `<input type="text" data-filter-col="${escapeHtml(colName)}" value="${escapeHtml(cur)}" placeholder="Contient…">`;
+      }
+      html += `</div>`;
+    });
+    html += `<button type="button" class="admin-filters-reset" id="admin-filters-reset">Réinitialiser les filtres</button>`;
+    panel.innerHTML = html;
+    panel.querySelectorAll("[data-filter-col]").forEach((el) => {
+      el.addEventListener(el.tagName === "SELECT" ? "change" : "input", () => {
+        const col = el.getAttribute("data-filter-col");
+        if (el.value) STATE[name].filters[col] = el.value;
+        else delete STATE[name].filters[col];
+        renderSheet(name);
+      });
+    });
+    document.getElementById("admin-filters-reset").addEventListener("click", () => {
+      STATE[name].filters = {};
+      buildFiltersPanel(name);
+      renderSheet(name);
+    });
+  }
+
+  document.getElementById("admin-toggle-filters").addEventListener("click", () => {
+    document.getElementById("admin-filters-panel").classList.toggle("hidden");
+  });
+
+  // Renvoie les lignes du feuillet après application de la recherche libre +
+  // des filtres par colonne — utilisé par l'affichage, les totaux et l'export.
+  function getFilteredRows(name) {
+    const { header, rows, filters } = STATE[name];
+    const search = document.getElementById("admin-search-input").value.trim().toLowerCase();
+    return rows.filter((r) => {
+      for (const colName in filters) {
+        const val = filters[colName];
+        const colIdx = idxOf(header, colName);
+        const cellVal = r.values[colIdx];
+        const asSelectSet = document.querySelector(`[data-filter-col="${CSS.escape(colName)}"]`);
+        const isSelect = asSelectSet && asSelectSet.tagName === "SELECT";
+        if (isSelect) {
+          if (cellVal !== val) return false;
+        } else {
+          if (!String(cellVal || "").toLowerCase().includes(val.toLowerCase())) return false;
+        }
+      }
       if (search) {
         const hay = r.values.map((v) => (v === null || v === undefined) ? "" : String(v)).join(" ").toLowerCase();
         if (!hay.includes(search)) return false;
       }
       return true;
     });
+  }
+
+  function renderStatsBar(name, filtered) {
+    const { header } = STATE[name];
+    const bar = document.getElementById("admin-stats-bar");
+    let html = `<strong>${filtered.length}</strong> élément${filtered.length > 1 ? "s" : ""}`;
+    header.forEach((colName, i) => {
+      if (!isNumericCol(colName)) return;
+      let sum = 0, has = false;
+      filtered.forEach((r) => { const n = parseNum(r.values[i]); if (n !== null) { sum += n; has = true; } });
+      if (has) html += ` <span>· ${escapeHtml(colName)} : <strong>${sum.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}</strong></span>`;
+    });
+    bar.innerHTML = html;
+  }
+
+  function updateBulkBar(name) {
+    const selected = STATE[name].selected;
+    const bar = document.getElementById("admin-bulk-bar");
+    if (selected.size === 0) { bar.classList.add("hidden"); return; }
+    bar.classList.remove("hidden");
+    document.getElementById("admin-bulk-count").textContent = `${selected.size} sélectionné${selected.size > 1 ? "s" : ""}`;
+  }
+
+  function renderSheet(name) {
+    const { header, selected } = STATE[name];
+    const catIdx = idxOf(header, "Catégorie");
+    const displayCols = header.filter((h) => h !== "Catégorie");
+    const filtered = getFilteredRows(name);
+
+    renderStatsBar(name, filtered);
+    updateBulkBar(name);
 
     const groups = {};
     filtered.forEach((r) => {
@@ -280,11 +368,13 @@
     Object.keys(groups).sort().forEach((cat) => {
       const items = groups[cat];
       html += `<div class="admin-cat-group"><div class="admin-cat-head"><span>${escapeHtml(cat)}</span><span class="admin-count">${items.length} élément${items.length > 1 ? "s" : ""}</span></div>`;
-      html += '<div class="admin-table-wrap"><table class="admin-table"><thead><tr>';
+      html += '<div class="admin-table-wrap"><table class="admin-table"><thead><tr><th class="admin-th-check"><input type="checkbox" data-select-all-group="1"></th>';
       displayCols.forEach((c) => html += `<th>${escapeHtml(c)}</th>`);
       html += "<th></th></tr></thead><tbody>";
       items.forEach((r) => {
-        html += `<tr class="admin-row-clickable" data-open="${r.index}" data-sheet="${escapeHtml(name)}">`;
+        const isSel = selected.has(r.index);
+        html += `<tr class="admin-row-clickable${isSel ? " admin-row-selected" : ""}" data-open="${r.index}" data-sheet="${escapeHtml(name)}">`;
+        html += `<td class="admin-td-check"><input type="checkbox" data-select="${r.index}" ${isSel ? "checked" : ""}></td>`;
         displayCols.forEach((colName) => {
           const colIdx = idxOf(header, colName);
           let v = r.values[colIdx];
@@ -321,6 +411,28 @@
         confirmDelete(el.getAttribute("data-sheet"), parseInt(el.getAttribute("data-delete")));
       });
     });
+    content.querySelectorAll("[data-select]").forEach((el) => {
+      el.addEventListener("click", (e) => e.stopPropagation());
+      el.addEventListener("change", () => {
+        const idx = parseInt(el.getAttribute("data-select"));
+        if (el.checked) STATE[name].selected.add(idx); else STATE[name].selected.delete(idx);
+        el.closest("tr").classList.toggle("admin-row-selected", el.checked);
+        updateBulkBar(name);
+      });
+    });
+    content.querySelectorAll("[data-select-all-group]").forEach((el) => {
+      el.addEventListener("click", (e) => e.stopPropagation());
+      el.addEventListener("change", () => {
+        const table = el.closest("table");
+        table.querySelectorAll("[data-select]").forEach((cb) => {
+          cb.checked = el.checked;
+          const idx = parseInt(cb.getAttribute("data-select"));
+          if (el.checked) STATE[name].selected.add(idx); else STATE[name].selected.delete(idx);
+          cb.closest("tr").classList.toggle("admin-row-selected", el.checked);
+        });
+        updateBulkBar(name);
+      });
+    });
   }
 
   function togglePw(cellId) {
@@ -331,7 +443,6 @@
   }
 
   document.getElementById("admin-search-input").addEventListener("input", () => renderSheet(currentSheet));
-  document.getElementById("admin-filter-etat").addEventListener("change", () => renderSheet(currentSheet));
 
   /* ---------------------------- Add / edit modal ---------------------------- */
   const rowOverlay = document.getElementById("admin-row-overlay");
@@ -553,4 +664,181 @@
 
   // Conserve l'ancien nom utilisé par les icônes poubelle dans le tableau.
   function confirmDelete(name, index) { deleteRow(name, index); }
+
+  /* ---------------------------- Bouton flottant "+ Ajouter" ---------------------------- */
+  const fabBtn = document.getElementById("admin-add-row-fab");
+  if (fabBtn) fabBtn.addEventListener("click", () => openAddRow());
+
+  /* ---------------------------- Export (Excel / Texte) ---------------------------- */
+  function rowsToAOA(name, rows) {
+    const { header } = STATE[name];
+    return [header, ...rows.map((r) => header.map((c, i) => r.values[i] ?? ""))];
+  }
+
+  function exportRowsXlsx(name, rows, suffix) {
+    const aoa = rowsToAOA(name, rows);
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+    XLSX.writeFile(wb, `${name} - ${suffix}.xlsx`);
+  }
+
+  function exportRowsTxt(name, rows, suffix) {
+    const { header } = STATE[name];
+    let text = header.join("\t") + "\n";
+    rows.forEach((r) => { text += header.map((c, i) => (r.values[i] ?? "")).join("\t") + "\n"; });
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name} - ${suffix}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // Le menu "Excel / Texte" est partagé entre le bouton de la toolbar (export
+  // du feuillet filtré) et le bouton de la barre d'actions groupées (export de
+  // la seule sélection) — pendingExportScope indique lequel a ouvert le menu.
+  let pendingExportScope = "filtered";
+  const exportMenu = document.getElementById("admin-export-menu");
+
+  document.getElementById("admin-export-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    pendingExportScope = "filtered";
+    exportMenu.classList.toggle("hidden");
+  });
+
+  const bulkExportBtn = document.getElementById("admin-bulk-export");
+  if (bulkExportBtn) {
+    bulkExportBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      pendingExportScope = "selected";
+      exportMenu.classList.remove("hidden");
+    });
+  }
+
+  document.addEventListener("click", (e) => {
+    if (!exportMenu.classList.contains("hidden") && !exportMenu.contains(e.target) && e.target.id !== "admin-export-btn" && e.target.id !== "admin-bulk-export") {
+      exportMenu.classList.add("hidden");
+    }
+  });
+
+  exportMenu.querySelectorAll("[data-export-format]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const format = btn.getAttribute("data-export-format");
+      exportMenu.classList.add("hidden");
+      const name = currentSheet;
+      let rows, suffix;
+      if (pendingExportScope === "selected") {
+        const sel = STATE[name].selected;
+        rows = STATE[name].rows.filter((r) => sel.has(r.index));
+        suffix = "sélection";
+        if (rows.length === 0) { toast("Aucune ligne sélectionnée.", "err"); return; }
+      } else {
+        rows = getFilteredRows(name);
+        suffix = "export";
+      }
+      if (format === "xlsx") exportRowsXlsx(name, rows, suffix); else exportRowsTxt(name, rows, suffix);
+      toast(`Export ${format.toUpperCase()} généré ✅`, "ok");
+    });
+  });
+
+  /* ---------------------------- Actions groupées ---------------------------- */
+  document.getElementById("admin-bulk-clear").addEventListener("click", () => {
+    STATE[currentSheet].selected.clear();
+    renderSheet(currentSheet);
+  });
+
+  document.getElementById("admin-bulk-delete").addEventListener("click", async () => {
+    const name = currentSheet;
+    const sel = [...STATE[name].selected];
+    if (sel.length === 0) return;
+    if (!confirm(`Supprimer ${sel.length} élément${sel.length > 1 ? "s" : ""} ? Cette action modifie directement le fichier Excel sur OneDrive.`)) return;
+    if (!STATE[name].live) { toast("Synchro OneDrive indisponible pour le moment.", "err"); return; }
+    // Index décroissants : chaque suppression décale les index suivants vers
+    // le bas, donc il faut toujours supprimer du plus grand index au plus petit.
+    const sortedDesc = sel.sort((a, b) => b - a);
+    try {
+      for (const idx of sortedDesc) {
+        await callAdmin("delete", { table: STATE[name].table, index: idx });
+      }
+      toast(`${sel.length} élément${sel.length > 1 ? "s" : ""} supprimé${sel.length > 1 ? "s" : ""} 🗑`, "ok");
+    } catch (err) {
+      toast("Erreur : " + (err.message || "suppression impossible"), "err");
+    } finally {
+      STATE[name].selected.clear();
+      await loadSheet(name);
+    }
+  });
+
+  document.getElementById("admin-bulk-duplicate").addEventListener("click", async () => {
+    const name = currentSheet;
+    const sel = [...STATE[name].selected];
+    if (sel.length === 0) return;
+    if (!STATE[name].live) { toast("Synchro OneDrive indisponible pour le moment.", "err"); return; }
+    const rowsToDup = STATE[name].rows.filter((r) => sel.includes(r.index));
+    try {
+      for (const r of rowsToDup) {
+        await callAdmin("add", { table: STATE[name].table, values: [r.values] });
+      }
+      toast(`${rowsToDup.length} élément${rowsToDup.length > 1 ? "s" : ""} dupliqué${rowsToDup.length > 1 ? "s" : ""} ✅`, "ok");
+    } catch (err) {
+      toast("Erreur : " + (err.message || "duplication impossible"), "err");
+    } finally {
+      STATE[name].selected.clear();
+      await loadSheet(name);
+    }
+  });
+
+  const bulkEditOverlay = document.getElementById("admin-bulk-edit-overlay");
+  document.getElementById("admin-bulk-edit").addEventListener("click", () => {
+    const name = currentSheet;
+    const sel = STATE[name].selected;
+    if (sel.size === 0) return;
+    const { header } = STATE[name];
+    const fieldSel = document.getElementById("admin-bulk-edit-field");
+    fieldSel.innerHTML = header.map((c, i) => `<option value="${i}">${escapeHtml(c)}</option>`).join("");
+    document.getElementById("admin-bulk-edit-sub").textContent =
+      `${sel.size} élément${sel.size > 1 ? "s" : ""} sélectionné${sel.size > 1 ? "s" : ""} — la valeur choisie remplace ce champ sur toutes ces lignes.`;
+    document.getElementById("admin-bulk-edit-value").value = "";
+    document.getElementById("admin-bulk-edit-error").textContent = "";
+    bulkEditOverlay.classList.remove("hidden");
+  });
+
+  document.getElementById("admin-bulk-edit-cancel").addEventListener("click", () => {
+    bulkEditOverlay.classList.add("hidden");
+  });
+
+  document.getElementById("admin-bulk-edit-form").addEventListener("submit", async function (e) {
+    e.preventDefault();
+    const name = currentSheet;
+    const sel = [...STATE[name].selected];
+    const errEl = document.getElementById("admin-bulk-edit-error");
+    errEl.textContent = "";
+    if (sel.length === 0) { errEl.textContent = "Aucune ligne sélectionnée."; return; }
+    if (!STATE[name].live) { errEl.textContent = "Synchro OneDrive indisponible pour le moment."; return; }
+    const colIdx = parseInt(document.getElementById("admin-bulk-edit-field").value);
+    const newVal = document.getElementById("admin-bulk-edit-value").value;
+    const btn = e.target.querySelector('button[type="submit"]');
+    if (btn) btn.disabled = true;
+    try {
+      for (const idx of sel) {
+        const row = STATE[name].rows.find((r) => r.index === idx);
+        if (!row) continue;
+        const values = row.values.slice();
+        values[colIdx] = newVal === "" ? null : newVal;
+        await callAdmin("update", { table: STATE[name].table, index: idx, values: [values] });
+      }
+      toast(`${sel.length} élément${sel.length > 1 ? "s" : ""} modifié${sel.length > 1 ? "s" : ""} ✅`, "ok");
+      bulkEditOverlay.classList.add("hidden");
+      STATE[name].selected.clear();
+      await loadSheet(name);
+    } catch (err) {
+      errEl.textContent = err.message || "Erreur lors de la modification groupée.";
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
 })();
