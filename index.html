@@ -765,9 +765,12 @@
     <form id="admin-row-form">
       <div class="admin-grid2" id="admin-row-fields"></div>
       <div class="admin-error-msg" id="admin-row-error"></div>
-      <div class="admin-modal-actions">
-        <button type="button" class="admin-btn admin-btn-ghost" id="admin-cancel-row">Annuler</button>
-        <button type="submit" class="admin-btn admin-btn-primary" id="admin-save-row">Enregistrer</button>
+      <div class="admin-modal-actions admin-modal-actions-split">
+        <button type="button" class="admin-btn admin-btn-danger hidden" id="admin-delete-row">🗑 Supprimer</button>
+        <div class="admin-modal-actions-right">
+          <button type="button" class="admin-btn admin-btn-ghost" id="admin-cancel-row">Annuler</button>
+          <button type="submit" class="admin-btn admin-btn-primary" id="admin-save-row">Enregistrer</button>
+        </div>
       </div>
     </form>
   </div>

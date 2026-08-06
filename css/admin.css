@@ -48,6 +48,18 @@ body[data-tab="admin"] {
   border-radius: 8px; padding: 5px 9px; cursor: pointer; font-size: 13px;
 }
 .admin-btn-icon:hover { color: var(--text); border-color: var(--accent); }
+.admin-btn-icon-danger:hover { color: var(--err); border-color: var(--err); }
+.admin-btn-danger { background: rgba(255,92,92,.12); color: var(--err); border: 1px solid rgba(255,92,92,.35); }
+.admin-btn-danger:hover { background: rgba(255,92,92,.22); }
+
+.hidden { display: none !important; }
+
+.admin-modal-actions-split { justify-content: space-between; }
+.admin-modal-actions-right { display: flex; gap: 10px; }
+@media (max-width: 480px) {
+  .admin-modal-actions-split { flex-wrap: wrap; }
+  .admin-modal-actions-right { width: 100%; justify-content: flex-end; }
+}
 
 /* ---- Dashboard shell ---- */
 .admin-dashboard { display: none; position: relative; z-index: 1; }
@@ -111,6 +123,8 @@ body[data-tab="admin"] {
 .admin-table td { padding: 10px 14px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; white-space: nowrap; }
 .admin-table tr:last-child td { border-bottom: none; }
 .admin-table tr:hover td { background: rgba(255,255,255,.02); }
+.admin-table tr.admin-row-clickable { cursor: pointer; }
+.admin-table tr.admin-row-clickable:hover td { background: var(--accent-soft); }
 
 .admin-pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
 .admin-pill-good { background: rgba(46,204,113,.15); color: var(--ok); }

@@ -41,4 +41,8 @@ ENV WHISPER_MODEL=small
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# --workers 1 explicite : sur le plan Pro (plusieurs vCPU), certains environnements Render
+# auto-détectent un nombre de workers > 1, ce qui chargerait le modèle whisper une fois par
+# worker et ferait grimper la RAM de base avant même de traiter une requête. Un seul worker
+# suffit ici (le traitement lourd tourne déjà dans un thread par job, pas par requête HTTP).
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]

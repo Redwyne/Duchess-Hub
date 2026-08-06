@@ -254,7 +254,7 @@
       displayCols.forEach((c) => html += `<th>${escapeHtml(c)}</th>`);
       html += "<th></th></tr></thead><tbody>";
       items.forEach((r) => {
-        html += `<tr>`;
+        html += `<tr class="admin-row-clickable" data-open="${r.index}" data-sheet="${escapeHtml(name)}">`;
         displayCols.forEach((colName) => {
           const colIdx = idxOf(header, colName);
           let v = r.values[colIdx];
@@ -272,8 +272,7 @@
           }
         });
         html += `<td class="admin-row-actions">
-          <button class="admin-btn-icon" title="Modifier" data-edit="${r.index}" data-sheet="${escapeHtml(name)}">✎</button>
-          <button class="admin-btn-icon" title="Supprimer" data-delete="${r.index}" data-sheet="${escapeHtml(name)}">🗑</button>
+          <button class="admin-btn-icon admin-btn-icon-danger" title="Supprimer" data-delete="${r.index}" data-sheet="${escapeHtml(name)}">🗑</button>
         </td></tr>`;
       });
       html += "</tbody></table></div></div>";
@@ -281,13 +280,16 @@
     content.innerHTML = html;
 
     content.querySelectorAll("[data-toggle-pw]").forEach((el) => {
-      el.addEventListener("click", () => togglePw(el.getAttribute("data-toggle-pw")));
+      el.addEventListener("click", (e) => { e.stopPropagation(); togglePw(el.getAttribute("data-toggle-pw")); });
     });
-    content.querySelectorAll("[data-edit]").forEach((el) => {
-      el.addEventListener("click", () => openEditRow(el.getAttribute("data-sheet"), parseInt(el.getAttribute("data-edit"))));
+    content.querySelectorAll("[data-open]").forEach((el) => {
+      el.addEventListener("click", () => openEditRow(el.getAttribute("data-sheet"), parseInt(el.getAttribute("data-open"))));
     });
     content.querySelectorAll("[data-delete]").forEach((el) => {
-      el.addEventListener("click", () => confirmDelete(el.getAttribute("data-sheet"), parseInt(el.getAttribute("data-delete"))));
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        confirmDelete(el.getAttribute("data-sheet"), parseInt(el.getAttribute("data-delete")));
+      });
     });
   }
 
@@ -336,11 +338,14 @@
     });
   }
 
+  const deleteRowBtn = document.getElementById("admin-delete-row");
+
   function openAddRow() {
     editingContext = null;
     document.getElementById("admin-row-modal-title").textContent = "Ajouter un élément — " + currentSheet;
     document.getElementById("admin-row-modal-sub").textContent = "Le code article n'est pas généré automatiquement : renseigne-le en suivant la nomenclature existante.";
     document.getElementById("admin-row-error").textContent = "";
+    deleteRowBtn.classList.add("hidden");
     buildRowForm(currentSheet, null);
     rowOverlay.classList.remove("hidden");
   }
@@ -352,9 +357,16 @@
     document.getElementById("admin-row-modal-title").textContent = "Modifier — " + name;
     document.getElementById("admin-row-modal-sub").textContent = "";
     document.getElementById("admin-row-error").textContent = "";
+    deleteRowBtn.classList.remove("hidden");
     buildRowForm(name, row.values);
     rowOverlay.classList.remove("hidden");
   }
+
+  deleteRowBtn.addEventListener("click", async () => {
+    if (!editingContext) return;
+    const done = await deleteRow(editingContext.sheet, editingContext.index);
+    if (done) rowOverlay.classList.add("hidden");
+  });
 
   document.getElementById("admin-row-form").addEventListener("submit", async function (e) {
     e.preventDefault();
@@ -386,18 +398,24 @@
   });
 
   /* ---------------------------- Delete ---------------------------- */
-  async function confirmDelete(name, index) {
+  // Retourne true si la suppression a bien eu lieu (utile pour fermer la popup d'édition).
+  async function deleteRow(name, index) {
     const row = STATE[name].rows.find((r) => r.index === index);
     const nomIdx = idxOf(STATE[name].header, "Nom");
     const label = row ? (row.values[nomIdx] || "cet élément") : "cet élément";
-    if (!confirm(`Supprimer « ${label} » ? Cette action modifie directement le fichier Excel sur OneDrive.`)) return;
-    if (!STATE[name].live) { toast("Synchro OneDrive indisponible pour le moment.", "err"); return; }
+    if (!confirm(`Êtes-vous sûr de vouloir supprimer « ${label} » ? Cette action modifie directement le fichier Excel sur OneDrive.`)) return false;
+    if (!STATE[name].live) { toast("Synchro OneDrive indisponible pour le moment.", "err"); return false; }
     try {
       await callWebhook(WEBHOOKS.delete, { table: STATE[name].table, index });
       toast("Élément supprimé 🗑", "ok");
       await loadSheet(name);
+      return true;
     } catch (err) {
       toast("Erreur : " + (err.message || "suppression impossible"), "err");
+      return false;
     }
   }
+
+  // Conserve l'ancien nom utilisé par les icônes poubelle dans le tableau.
+  function confirmDelete(name, index) { deleteRow(name, index); }
 })();

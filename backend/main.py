@@ -497,11 +497,35 @@ def process_job(
         probe = subprocess.run(
             [
                 "ffprobe", "-v", "error", "-select_streams", "v:0",
-                "-show_entries", "stream=height", "-of", "csv=p=0", str(upload_path),
+                "-show_entries", "stream=width,height:format=duration",
+                "-of", "csv=p=0", str(upload_path),
             ],
             capture_output=True, text=True,
         )
-        video_h = int((probe.stdout or "1920").strip() or 1920)
+        probe_lines = [l for l in (probe.stdout or "").strip().splitlines() if l]
+        video_w, video_h = 1080, 1920
+        duration_s = 0.0
+        if probe_lines:
+            parts = probe_lines[0].split(",")
+            if len(parts) >= 2:
+                video_w = int(parts[0] or 1080)
+                video_h = int(parts[1] or 1920)
+        if len(probe_lines) > 1:
+            try:
+                duration_s = float(probe_lines[1])
+            except ValueError:
+                pass
+
+        # Garde-fou : un burn-in ffmpeg sur une source trop longue peut dépasser la RAM du
+        # conteneur (observé : "Ran out of memory (used over 4GB)" sur un test réel) — on
+        # préfère un message clair plutôt qu'un crash silencieux qui efface le job (SQLite
+        # non persistant -> "job inconnu" au prochain poll).
+        MAX_DURATION_S = 600  # 10 min, largement au-dessus d'un single/clip TikTok
+        if duration_s > MAX_DURATION_S:
+            raise RuntimeError(
+                f"Vidéo trop longue ({int(duration_s // 60)} min) pour le rendu en ligne "
+                f"— limite actuelle {MAX_DURATION_S // 60} min. Coupe le fichier ou repasse par un export plus court."
+            )
 
         ass_path = DATA_DIR / f"{job_id}.ass"
         ass_path.write_text(
@@ -519,9 +543,24 @@ def process_job(
         # ffmpeg a besoin d'un chemin sans caractères spéciaux problématiques dans le filtre -vf ass=...
         safe_ass = DATA_DIR / f"{job_id}_subs.ass"
         shutil.copy(ass_path, safe_ass)
+
+        # Downscale de sécurité : les exports iPhone/Android dépassent souvent 1080p en
+        # hauteur (parfois 4K) — inutile pour un rendu social, et ça fait grimper la RAM du
+        # burn-in (décodage + filtre + encodage) bien au-delà de ce qu'un conteneur à 4 Go
+        # peut tenir. On plafonne le plus grand côté à 1920px, l'autre suit au prorata.
+        MAX_DIM = 1920
+        vf_chain = f"ass={safe_ass.as_posix()}"
+        if max(video_w, video_h) > MAX_DIM:
+            if video_h >= video_w:
+                scale = f"scale=-2:{MAX_DIM}"
+            else:
+                scale = f"scale={MAX_DIM}:-2"
+            vf_chain = f"{scale},{vf_chain}"
+
         run([
             "ffmpeg", "-y", "-i", str(upload_path),
-            "-vf", f"ass={safe_ass.as_posix()}",
+            "-vf", vf_chain,
+            "-c:v", "libx264", "-preset", "veryfast", "-threads", "2",
             "-c:a", "copy", str(out_path),
         ])
         update_job(

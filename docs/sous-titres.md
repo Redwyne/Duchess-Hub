@@ -107,8 +107,9 @@ Les 3 modes ci-dessus ne sont pas théoriques — les 2 premiers sont déjà uti
 
 1. Clé API Flowstage branchée côté backend (pour aller chercher l'audio maître au lieu de transcrire l'upload).
 2. Stockage persistant pour le cache "Lyrics Timing" — SQLite actuel n'est pas persistant entre redéploiements sur le plan Render en cours (disque non persistant) : Postgres Render ou disque persistant à évaluer si le volume le justifie.
-3. Vérifier si `WEB_CONCURRENCY=2` (2 process uvicorn observés sur le plan Pro) charge le modèle whisper deux fois (un singleton par process) — pas encore confirmé comme un problème, fix potentiel : forcer `--workers 1` dans le `CMD` du Dockerfile.
+3. ~~Vérifier si 2 workers uvicorn chargent le modèle whisper deux fois~~ — fait : `--workers 1` forcé explicitement dans le `CMD` du Dockerfile pour éliminer le doute.
 4. Test end-to-end sur plusieurs singles réels avec les nouveaux modes/effets (fait en local via rendu ffmpeg synthétique — reste à valider sur de la vraie vidéo/voix).
+5. **OOM confirmé sur fichier réel** (Render : "Ran out of memory (used over 4Go)") pendant le burn-in ffmpeg d'une vidéo longue/lourde. Deux garde-fous ajoutés dans `process_job()` : downscale de sécurité si la source dépasse 1920px sur son plus grand côté (les exports téléphone dépassent souvent 1080p, inutile pour du rendu social et ça fait grimper la RAM), et refus explicite (message clair) au-delà de 10 min de vidéo au lieu d'un crash silencieux. `-preset veryfast -threads 2` ajoutés à l'encodage pour brider la RAM du burn-in. À confirmer sur le prochain test avec un vrai fichier volumineux.
 
 ## 6. Points encore ouverts
 
