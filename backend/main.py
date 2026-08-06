@@ -60,6 +60,61 @@ WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL", "small")
 DB_PATH = DATA_DIR / "app.db"
 
 # --------------------------------------------------------------------------
+# Stockage distant (Cloudflare R2) — les résultats générés (.srt / .mp4) sont
+# uploadés ici quand c'est configuré, car le disque du conteneur Render n'est
+# PAS persistant : à chaque redéploiement, tout ce qui est sous DATA_DIR (donc
+# RESULTS_DIR) est effacé, y compris les fichiers déjà générés. Sans R2, un
+# fichier généré juste avant un nouveau déploiement devient introuvable dès
+# que le conteneur redémarre. Avec R2, l'URL de téléchargement pointe vers le
+# bucket et reste valable même après un redéploiement du backend.
+# Variables d'env à définir sur Render (Dashboard > service backend > Environment) :
+# R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME.
+# Tant qu'elles ne sont pas toutes les 4 renseignées, le backend se rabat
+# automatiquement sur le stockage local /files/... comme avant.
+R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "")
+R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
+R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
+R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "")
+R2_ENABLED = bool(R2_ACCOUNT_ID and R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_BUCKET_NAME)
+
+_r2_client = None
+
+
+def get_r2_client():
+    global _r2_client
+    if _r2_client is None:
+        import boto3
+
+        _r2_client = boto3.client(
+            "s3",
+            endpoint_url=f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com",
+            aws_access_key_id=R2_ACCESS_KEY_ID,
+            aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+            region_name="auto",
+        )
+    return _r2_client
+
+
+def upload_to_r2(local_path: Path, key: str):
+    """Upload le résultat vers R2 et renvoie une URL de téléchargement valable 7 jours.
+    Renvoie None si R2 n'est pas configuré ou si l'upload échoue — dans ce cas
+    process_job() se rabat sur l'URL locale /files/... (perdue au prochain redéploiement,
+    mais ça ne bloque jamais un job qui a fini de rendre)."""
+    if not R2_ENABLED:
+        return None
+    try:
+        client = get_r2_client()
+        client.upload_file(str(local_path), R2_BUCKET_NAME, key)
+        return client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": R2_BUCKET_NAME, "Key": key},
+            ExpiresIn=7 * 24 * 3600,  # 7 jours, largement suffisant pour aller récupérer le fichier
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[R2] upload échoué pour {key}: {e}")
+        return None
+
+# --------------------------------------------------------------------------
 # Onglet Admin — auth + proxy vers les scénarios Make (inventaire OneDrive)
 # --------------------------------------------------------------------------
 # Rien de secret ici : ADMIN_AUTH_SECRET, ADMIN_USERS et les 4 URLs de webhook
@@ -509,12 +564,13 @@ def process_job(
         if option == "file":
             out_path = RESULTS_DIR / f"{job_id}.srt"
             out_path.write_text(build_srt(words), encoding="utf-8")
+            remote_url = upload_to_r2(out_path, f"{job_id}.srt")
             update_job(
                 job_id,
                 step_srt=1,
                 status="done",
                 current_label="Terminé",
-                download_url=f"/files/{job_id}.srt",
+                download_url=remote_url or f"/files/{job_id}.srt",
             )
             return
 
@@ -588,12 +644,13 @@ def process_job(
             "-c:v", "libx264", "-preset", "veryfast", "-threads", "2",
             "-c:a", "copy", str(out_path),
         ])
+        remote_url = upload_to_r2(out_path, f"{job_id}.mp4")
         update_job(
             job_id,
             step_render=1,
             status="done",
             current_label="Terminé",
-            download_url=f"/files/{job_id}.mp4",
+            download_url=remote_url or f"/files/{job_id}.mp4",
         )
     except subprocess.CalledProcessError as e:
         update_job(job_id, status="error", error_message=(e.stderr or b"").decode(errors="ignore")[:500])
