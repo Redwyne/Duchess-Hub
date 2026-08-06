@@ -20,12 +20,15 @@ Etat v2 (styles étendus) :
   n'est PAS persistant entre redéploiements -> le cache est reconstruit au besoin, ce n'est pas grave
   pour la mécanique mais à garder en tête (upgrade possible vers un disque persistant Render, ou Postgres,
   si le volume le justifie).
-- Recherche audio maître Flowstage : pas encore branchée (clé API à fournir) -> on transcrit toujours
-  l'audio extrait du fichier uploadé pour l'instant. TODO une fois la clé fournie.
+- Recherche audio maître Flowstage : si FLOWSTAGE_API_KEY est renseignée, on cherche d'abord une
+  aesthetic Flowstage correspondant à l'artiste/titre (matching flou, tolère accents/casse/code
+  numérique en tête) et on réutilise ses paroles + timing de ligne (texte garanti juste, timing mot
+  par mot interpolé au prorata des caractères) avant de retomber sur faster-whisper.
 """
 
 import base64
 import datetime
+import difflib
 import hashlib
 import hmac
 import json
@@ -36,6 +39,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+import unicodedata
 import uuid
 from pathlib import Path
 
@@ -58,6 +62,13 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL", "small")
 DB_PATH = DATA_DIR / "app.db"
+
+# Clé API Flowstage (app.theflowstage.com/api-keys) — quand elle est renseignée, le backend
+# essaie de retrouver l'aesthetic Flowstage correspondante et d'en réutiliser les paroles
+# vérifiées (bien plus fiables qu'une transcription automatique) avant de se rabattre sur
+# faster-whisper. Voir find_flowstage_aesthetic() / get_flowstage_words() plus bas.
+FLOWSTAGE_API_KEY = os.environ.get("FLOWSTAGE_API_KEY", "")
+FLOWSTAGE_BASE_URL = "https://api.theflowstage.com"
 
 # --------------------------------------------------------------------------
 # Stockage distant (Cloudflare R2) — les résultats générés (.srt / .mp4) sont
@@ -181,9 +192,18 @@ def init_db():
             step_srt INTEGER DEFAULT 0,
             step_render INTEGER DEFAULT 0,
             download_url TEXT,
-            error_message TEXT
+            error_message TEXT,
+            words_json TEXT
         )"""
     )
+    # words_json ajouté après coup — ALTER TABLE idempotent pour les bases déjà créées avec
+    # l'ancien schéma (le CREATE TABLE IF NOT EXISTS ci-dessus ne migre pas les tables
+    # existantes). Utilisé par l'option "preview" (transcription seule, pour l'aperçu vidéo
+    # live côté front, sans passer par tout le pipeline SRT/ASS/rendu).
+    try:
+        conn.execute("ALTER TABLE jobs ADD COLUMN words_json TEXT")
+    except sqlite3.OperationalError:
+        pass  # colonne déjà présente
     conn.execute(
         """CREATE TABLE IF NOT EXISTS lyrics_timing (
             single_cle TEXT,
@@ -244,29 +264,159 @@ def transcribe(audio_path: Path, granularity: str):
     return words
 
 
-def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path):
+# --------------------------------------------------------------------------
+# Flowstage — retrouver l'aesthetic correspondante + réutiliser ses paroles
+# --------------------------------------------------------------------------
+# Avant : il fallait taper l'intitulé EXACT (casse comprise) de l'aesthetic Flowstage pour
+# la retrouver (limite déjà connue côté Make, voir docs/sous-titres.md). Ici on fait un
+# matching flou (accents/casse/ponctuation ignorés, tolère les variations, ignore le code
+# numérique en tête du nom style "0006 Toi & Moi") — plus besoin de coller exactement.
+
+_flowstage_aesthetics_cache = {"data": None, "ts": 0.0}
+
+
+def _normalize_match(s: str) -> str:
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode("ascii")
+    s = re.sub(r"^\d{3,6}\s+", "", s)  # retire un éventuel code numérique en tête (ex: "0006 ")
+    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+
+
+def get_flowstage_aesthetics():
+    if not FLOWSTAGE_API_KEY:
+        return []
+    now = time.time()
+    if _flowstage_aesthetics_cache["data"] is not None and now - _flowstage_aesthetics_cache["ts"] < 300:
+        return _flowstage_aesthetics_cache["data"]
+    try:
+        r = requests.get(
+            f"{FLOWSTAGE_BASE_URL}/v1/aesthetics",
+            headers={"X-API-Key": FLOWSTAGE_API_KEY},
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json().get("aesthetics", [])
+        _flowstage_aesthetics_cache["data"] = data
+        _flowstage_aesthetics_cache["ts"] = now
+        return data
+    except Exception as e:  # noqa: BLE001
+        print(f"[Flowstage] liste aesthetics échouée: {e}")
+        return []
+
+
+def find_flowstage_aesthetic(artiste: str, titre: str):
+    if not (artiste or "").strip() and not (titre or "").strip():
+        return None
+    aesthetics = get_flowstage_aesthetics()
+    if not aesthetics:
+        return None
+    target_full = _normalize_match(f"{artiste} {titre}")
+    target_titre = _normalize_match(titre)
+    if not target_full and not target_titre:
+        return None
+    best, best_score = None, 0.0
+    for a in aesthetics:
+        name_norm = _normalize_match(a.get("name", ""))
+        if not name_norm:
+            continue
+        score = max(
+            difflib.SequenceMatcher(None, target_full, name_norm).ratio(),
+            difflib.SequenceMatcher(None, target_titre, name_norm).ratio(),
+        )
+        if target_titre and len(target_titre) >= 3 and target_titre in name_norm:
+            score = max(score, 0.9)  # le titre apparaît tel quel dans le nom -> quasi certain
+        if score > best_score:
+            best_score, best = score, a
+    return best if best_score >= 0.55 else None
+
+
+def _interpolate_words(lines_abs):
+    """Découpe chaque ligne Flowstage (texte vérifié, timing de ligne) en mots avec un timing
+    interpolé au prorata du nombre de caractères — pas aussi précis qu'un vrai timing mot par
+    mot, mais le texte lui-même est garanti juste (contrairement à une transcription auto)."""
+    words = []
+    for line in lines_abs:
+        tokens = line["text"].split()
+        if not tokens:
+            continue
+        total_chars = sum(len(t) for t in tokens) or 1
+        duration = max(line["end"] - line["start"], 0.05)
+        t = line["start"]
+        for tok in tokens:
+            frac = len(tok) / total_chars
+            w_dur = duration * frac
+            words.append({"text": tok, "start": t, "end": t + w_dur})
+            t += w_dur
+    return words
+
+
+def get_flowstage_words(aesthetic_id: str, granularity: str):
+    try:
+        r = requests.get(
+            f"{FLOWSTAGE_BASE_URL}/v1/aesthetics/{aesthetic_id}/audios",
+            headers={"X-API-Key": FLOWSTAGE_API_KEY},
+            timeout=20,
+        )
+        r.raise_for_status()
+        audios = r.json().get("audios", [])
+    except Exception as e:  # noqa: BLE001
+        print(f"[Flowstage] récupération paroles échouée: {e}")
+        return None
+
+    lines_abs = []
+    for audio in audios:
+        for section in audio.get("sections", []):
+            sec_start = section.get("start_time", 0) or 0
+            for line in section.get("lines", []):
+                text = (line.get("text") or "").strip()
+                if not text:
+                    continue
+                lines_abs.append({
+                    "text": text,
+                    "start": sec_start + (line.get("start_time", 0) or 0),
+                    "end": sec_start + (line.get("end_time", 0) or 0),
+                })
+    lines_abs.sort(key=lambda l: l["start"])
+    if not lines_abs:
+        return None
+
+    return lines_abs if granularity == "phrase" else _interpolate_words(lines_abs)
+
+
+def _cache_timing(single_cle: str, granularity: str, words, source: str):
+    conn = db()
+    conn.execute(
+        "INSERT OR REPLACE INTO lyrics_timing VALUES (?, ?, ?, ?, ?)",
+        (single_cle, granularity, json.dumps(words), source, datetime.datetime.utcnow().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artiste: str = "", titre: str = ""):
+    """Source des paroles timées, par ordre de préférence :
+    1. Cache local (déjà généré une fois, peu importe la source d'origine).
+    2. Flowstage (paroles vérifiées manuellement, bien plus fiables qu'une transcription
+       automatique — voir find_flowstage_aesthetic / get_flowstage_words).
+    3. Repli : transcription faster-whisper de l'audio uploadé."""
     conn = db()
     row = conn.execute(
         "SELECT timing_json FROM lyrics_timing WHERE single_cle = ? AND granularite = ?",
         (single_cle, granularity),
     ).fetchone()
+    conn.close()
     if row:
-        conn.close()
         return json.loads(row["timing_json"])
 
+    if FLOWSTAGE_API_KEY:
+        aesthetic = find_flowstage_aesthetic(artiste, titre)
+        if aesthetic:
+            words = get_flowstage_words(aesthetic["id"], granularity)
+            if words:
+                _cache_timing(single_cle, granularity, words, "flowstage")
+                return words
+
     words = transcribe(audio_path, granularity)
-    conn.execute(
-        "INSERT OR REPLACE INTO lyrics_timing VALUES (?, ?, ?, ?, ?)",
-        (
-            single_cle,
-            granularity,
-            json.dumps(words),
-            "audio_uploade",  # TODO: "flowstage_master" une fois la clé API Flowstage branchée
-            datetime.datetime.utcnow().isoformat(),
-        ),
-    )
-    conn.commit()
-    conn.close()
+    _cache_timing(single_cle, granularity, words, "audio_uploade")
     return words
 
 
@@ -565,17 +715,32 @@ def process_job(
     fond="contour", text_case="majuscule", accent_color="#ffd400", italic=False, words_per_group=3,
 ):
     try:
-        granularity = "mot" if (option == "video" and mode != "full") else "phrase"
+        if option == "preview":
+            granularity = "mot"  # le live-preview a besoin du timing mot par mot, quel que soit le mode
+        else:
+            granularity = "mot" if (option == "video" and mode != "full") else "phrase"
         single_cle = slugify_key(artiste, titre)
 
         audio_path = DATA_DIR / f"{job_id}_audio.wav"
         run(["ffmpeg", "-y", "-i", str(upload_path), "-vn", "-ac", "1", "-ar", "16000", str(audio_path)])
 
-        words = get_or_transcribe(single_cle, granularity, audio_path)
+        words = get_or_transcribe(single_cle, granularity, audio_path, artiste=artiste, titre=titre)
         update_job(job_id, step_lyrics=1, current_label="Paroles timées")
 
         if not words:
             raise RuntimeError("Transcription vide — vérifie que le fichier contient bien de la voix audible.")
+
+        if option == "preview":
+            # Transcription seule, pas de SRT/ASS/rendu — sert uniquement à alimenter
+            # l'aperçu vidéo live côté front (vraie vidéo + vrai timing, pendant que
+            # l'utilisateur choisit son style, avant de lancer le vrai rendu).
+            update_job(
+                job_id,
+                status="done",
+                current_label="Terminé",
+                words_json=json.dumps(words),
+            )
+            return
 
         if option == "file":
             out_path = RESULTS_DIR / f"{job_id}.srt"
@@ -810,8 +975,16 @@ async def admin_inventaire(action: str, payload: dict = Body(default={}), _ok: b
             status_code=500,
             detail=f"Action '{action}' inconnue ou variable d'environnement manquante côté serveur.",
         )
+    forward_payload = dict(payload)
+    # Make corrompt silencieusement les tableaux imbriqués passés en JSON natif
+    # au module microsoft-excel:makeApiCall (le body Graph arrive vide côté
+    # Excel, sans erreur). On pré-sérialise donc nous-mêmes le corps exact
+    # attendu par Microsoft Graph et on le transmet comme simple texte, que
+    # Make n'a plus qu'à recopier tel quel — aucune coercion de type requise.
+    if action in ("add", "update") and "values" in payload:
+        forward_payload["graph_body"] = json.dumps({"values": payload["values"]})
     try:
-        r = requests.post(url, json=payload, timeout=25)
+        r = requests.post(url, json=forward_payload, timeout=25)
     except requests.RequestException as e:
         raise HTTPException(status_code=502, detail=f"Erreur de connexion à Make : {e}")
     try:

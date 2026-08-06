@@ -1254,7 +1254,21 @@ input[type="color"] {
   box-shadow: 0 20px 50px -20px rgba(0,0,0,.6);
 }
 
+.preview-video {
+  position: absolute;
+  inset: -14px; /* déborde sur le padding du téléphone pour remplir tout le cadre, coupé par overflow:hidden */
+  width: calc(100% + 28px);
+  height: calc(100% + 28px);
+  object-fit: cover;
+  z-index: 0;
+  display: none;
+  background: #000;
+}
+.preview-video.show { display: block; }
+
 .preview-text {
+  position: relative;
+  z-index: 1;
   text-align: center;
   white-space: pre-line;
   line-height: 1.15;

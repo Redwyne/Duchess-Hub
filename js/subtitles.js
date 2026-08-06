@@ -37,6 +37,10 @@
 
   const previewPhone = document.getElementById("srt-previewPhone");
   const previewText = document.getElementById("srt-previewText");
+  const previewVideo = document.getElementById("srt-previewVideo");
+  const previewCaption = document.getElementById("srt-previewCaption");
+  const artisteInput = document.getElementById("srt-artiste");
+  const titreInput = document.getElementById("srt-titre");
 
   const form = document.getElementById("srt-genForm");
   const goBtn = document.getElementById("srt-go");
@@ -55,6 +59,18 @@
   // ---------------------------------------------------------------------
   let currentOption = "file"; // "file" | "video"
   let selectedFile = null;
+
+  // Aperçu vidéo live (§16) : pendant que l'utilisateur choisit son style, on rejoue LA vraie
+  // vidéo choisie (lecture locale, aucun upload nécessaire pour ça) et on incruste les sous-titres
+  // par-dessus en HTML/CSS, synchronisés sur le vrai timing des paroles récupéré via un job léger
+  // "preview" (transcription seule, pas de rendu ffmpeg) — voir schedulePreviewJob().
+  let previewObjectUrl = null;
+  let realWords = null; // [{text, start, end}] une fois le job preview terminé
+  let realCues = [];    // cues reconstruits à partir de realWords, selon le mode/groupSize courant
+  let previewJobId = null;
+  let previewPollTimer = null;
+  let previewDebounceTimer = null;
+  let lastRealCueIdx = -1;
 
   const PRESETS = {
     "build-rond": {
@@ -94,11 +110,20 @@
       dzLabel.textContent = "Fichier vidéo";
       dzText.textContent = "Glisse ta vidéo ici, ou clique pour choisir";
       goBtn.textContent = "Générer la vidéo sous-titrée";
+      if (selectedFile && selectedFile.type.startsWith("video/")) {
+        if (!previewObjectUrl) previewObjectUrl = URL.createObjectURL(selectedFile);
+        previewVideo.src = previewObjectUrl;
+        previewVideo.classList.add("show");
+        previewVideo.play().catch(() => {});
+        if (!realWords) schedulePreviewJob();
+      }
     } else {
       fileInput.setAttribute("accept", "audio/*,video/*");
       dzLabel.textContent = "Fichier audio";
       dzText.textContent = "Glisse ton audio ici, ou clique pour choisir";
       goBtn.textContent = "Générer le .srt";
+      previewVideo.classList.remove("show");
+      previewVideo.pause();
     }
   }
   optionBtns.forEach((btn) => btn.addEventListener("click", () => setOption(btn.dataset.option)));
@@ -111,6 +136,22 @@
     if (!file) return;
     selectedFile = file;
     dzFile.textContent = file.name + " · " + (file.size / (1024 * 1024)).toFixed(1) + " Mo";
+
+    resetRealPreview();
+    if (previewObjectUrl) { URL.revokeObjectURL(previewObjectUrl); previewObjectUrl = null; }
+
+    if (currentOption === "video" && file.type.startsWith("video/")) {
+      previewObjectUrl = URL.createObjectURL(file);
+      previewVideo.src = previewObjectUrl;
+      previewVideo.classList.add("show");
+      previewVideo.play().catch(() => {});
+      restartPreviewAnim(); // relance la démo texte le temps que le vrai timing arrive
+      schedulePreviewJob();
+    } else {
+      previewVideo.classList.remove("show");
+      previewVideo.pause();
+      previewVideo.removeAttribute("src");
+    }
   }
   dropzone.addEventListener("click", () => fileInput.click());
   dropzone.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") fileInput.click(); });
@@ -124,6 +165,16 @@
   dropzone.addEventListener("drop", (e) => {
     const file = e.dataTransfer.files && e.dataTransfer.files[0];
     if (file) pickFile(file);
+  });
+
+  // Retente l'aperçu vidéo live si l'artiste/titre change après coup — ça peut débloquer un
+  // matching Flowstage (paroles vérifiées) là où on n'avait au départ que la transcription auto.
+  [artisteInput, titreInput].forEach((el) => {
+    el.addEventListener("change", () => {
+      if (currentOption === "video" && selectedFile && selectedFile.type.startsWith("video/")) {
+        schedulePreviewJob();
+      }
+    });
   });
 
   // ---------------------------------------------------------------------
@@ -363,12 +414,25 @@
       previewText.style.textShadow = "0 2px 10px rgba(0,0,0,.5), 0 0 1px rgba(0,0,0,.8)";
     }
 
-    if (currentFrames.length) renderFrame(currentFrames[currentFrameIdx]);
+    if (realWords && realWords.length && realCues.length) {
+      renderFrame(realCues[lastRealCueIdx >= 0 ? lastRealCueIdx : 0]);
+    } else if (currentFrames.length) {
+      renderFrame(currentFrames[currentFrameIdx]);
+    }
   }
 
   function restartPreviewAnim() {
     if (previewTimer) { clearInterval(previewTimer); previewTimer = null; }
     updatePreviewStyle();
+
+    // Si le vrai timing (Flowstage ou transcription) est déjà là, on reste sur l'aperçu
+    // synchronisé à la vraie vidéo (voir rebuildRealCues / la boucle realSyncTick) — pas
+    // besoin de la démo texte qui cycle toute seule.
+    if (realWords && realWords.length) {
+      rebuildRealCues();
+      lastRealCueIdx = -1; // force un ré-affichage immédiat au prochain tick
+      return;
+    }
 
     currentFrames = buildPreviewFrames(state.mode);
     currentFrameIdx = 0;
@@ -383,8 +447,175 @@
     }, 850);
   }
 
+  // ---------------------------------------------------------------------
+  // Aperçu vidéo live avec le vrai timing (§16) — lit la vidéo choisie localement (pas
+  // d'upload nécessaire pour ça) et synchronise les cues sur video.currentTime. Les cues sont
+  // construits avec la même logique de regroupement que buildPreviewFrames, mais à partir des
+  // vrais mots + timestamps renvoyés par un job "preview" (transcription seule, ou paroles
+  // Flowstage si le single est reconnu — voir get_or_transcribe côté backend).
+  // ---------------------------------------------------------------------
+  function resetRealPreview() {
+    realWords = null;
+    realCues = [];
+    lastRealCueIdx = -1;
+    previewJobId = null;
+    if (previewPollTimer) { clearInterval(previewPollTimer); previewPollTimer = null; }
+    previewCaption.textContent = "Aperçu texte (pas encore le rendu vidéo réel)";
+  }
+
+  function schedulePreviewJob() {
+    if (previewDebounceTimer) clearTimeout(previewDebounceTimer);
+    previewDebounceTimer = setTimeout(startPreviewJob, 700);
+  }
+
+  async function startPreviewJob() {
+    if (!selectedFile || currentOption !== "video") return;
+    resetRealPreview();
+    previewCaption.textContent = "Analyse des paroles en cours…";
+
+    const jobId = uuid();
+    previewJobId = jobId;
+    const fd = new FormData();
+    fd.append("job_id", jobId);
+    fd.append("option", "preview");
+    fd.append("artiste", artisteInput.value.trim());
+    fd.append("titre", titreInput.value.trim());
+    fd.append("file", selectedFile);
+
+    try {
+      await fetch(BACKEND_BASE_URL + "/jobs", { method: "POST", body: fd });
+      if (jobId === previewJobId) pollPreviewJob(jobId);
+    } catch (e) {
+      if (jobId === previewJobId) previewCaption.textContent = "Aperçu texte (pas encore le rendu vidéo réel)";
+    }
+  }
+
+  function pollPreviewJob(jobId) {
+    if (previewPollTimer) clearInterval(previewPollTimer);
+    const deadline = Date.now() + 90000; // 90s — transcription seule, doit être rapide
+    previewPollTimer = setInterval(async () => {
+      if (jobId !== previewJobId) { clearInterval(previewPollTimer); previewPollTimer = null; return; }
+      if (Date.now() > deadline) {
+        clearInterval(previewPollTimer);
+        previewPollTimer = null;
+        previewCaption.textContent = "Aperçu texte (analyse indisponible)";
+        return;
+      }
+      try {
+        const res = await fetch(BACKEND_BASE_URL + "/jobs/" + jobId);
+        const data = await res.json();
+        if (jobId !== previewJobId) { clearInterval(previewPollTimer); previewPollTimer = null; return; }
+        if (data.error_message) {
+          clearInterval(previewPollTimer);
+          previewPollTimer = null;
+          previewCaption.textContent = "Aperçu texte (analyse indisponible)";
+          return;
+        }
+        if (data.words_json) {
+          clearInterval(previewPollTimer);
+          previewPollTimer = null;
+          realWords = JSON.parse(data.words_json);
+          if (previewTimer) { clearInterval(previewTimer); previewTimer = null; }
+          previewCaption.textContent = "Aperçu vidéo — vrai timing des paroles";
+          rebuildRealCues();
+          lastRealCueIdx = -1;
+        }
+      } catch (e) {
+        // hoquet réseau — on retente au prochain tick
+      }
+    }, 1500);
+  }
+
+  function rebuildRealCues() {
+    if (!realWords || !realWords.length) { realCues = []; return; }
+    const mode = state.mode;
+    const groupSize = Math.max(1, Math.min(8, parseInt(groupSizeSlider.value, 10) || 3));
+    const W = realWords;
+    const cues = [];
+
+    if (mode === "full") {
+      cues.push({
+        lines: [W.map((w) => w.text).join(" ")],
+        start: W[0].start, end: W[W.length - 1].end, active: -1,
+      });
+    } else if (mode === "replace") {
+      W.forEach((w) => cues.push({ lines: [w.text], start: w.start, end: w.end, active: -1 }));
+    } else if (mode === "build") {
+      let group = [];
+      let groupStartIdx = 0;
+      W.forEach((w, i) => {
+        if (group.length === 0) groupStartIdx = i;
+        group.push(w.text);
+        cues.push({ lines: wrapBuildLine(group), start: W[groupStartIdx].start, end: w.end, active: -1 });
+        if (group.length >= groupSize) group = [];
+      });
+    } else if (mode === "build_vertical") {
+      let group = [];
+      let groupStartIdx = 0;
+      W.forEach((w, i) => {
+        if (group.length === 0) groupStartIdx = i;
+        group.push(w.text);
+        cues.push({ lines: group.slice(), start: W[groupStartIdx].start, end: w.end, active: -1 });
+        if (group.length >= groupSize) group = [];
+      });
+    } else if (mode === "stack") {
+      const chunks = [];
+      for (let i = 0; i < W.length; i += groupSize) {
+        const slice = W.slice(i, i + groupSize);
+        chunks.push({ text: slice.map((w) => w.text).join(" "), start: slice[0].start, end: slice[slice.length - 1].end });
+      }
+      let win = [];
+      chunks.forEach((c) => {
+        win.push(c);
+        if (win.length > 3) win.shift();
+        cues.push({ lines: win.map((x) => x.text), start: c.start, end: c.end, active: -1 });
+      });
+    } else if (mode === "karaoke") {
+      const kSize = Math.max(2, groupSize);
+      for (let g = 0; g < W.length; g += kSize) {
+        const group = W.slice(g, g + kSize);
+        group.forEach((word, i) => {
+          cues.push({
+            lines: [group.map((w) => w.text).join(" ")],
+            start: word.start, end: word.end, active: i,
+            groupWords: group.map((w) => w.text),
+          });
+        });
+      }
+    }
+
+    realCues = cues;
+  }
+
+  function findRealCueIndex(t) {
+    // Les cues sont triées par start croissant (même ordre que les mots) — le sous-titre reste
+    // affiché jusqu'au début du suivant (pas de trou visuel entre deux cues).
+    for (let i = realCues.length - 1; i >= 0; i--) {
+      if (t >= realCues[i].start) return i;
+    }
+    return -1;
+  }
+
+  function realSyncTick() {
+    if (realCues.length && previewVideo.classList.contains("show")) {
+      const t = previewVideo.currentTime || 0;
+      const idx = findRealCueIndex(t);
+      if (idx !== lastRealCueIdx) {
+        lastRealCueIdx = idx;
+        if (idx >= 0) {
+          applyPreviewEffect();
+          renderFrame(realCues[idx]);
+        } else {
+          previewText.textContent = "";
+        }
+      }
+    }
+    requestAnimationFrame(realSyncTick);
+  }
+
   window.addEventListener("resize", updatePreviewStyle);
   restartPreviewAnim();
+  requestAnimationFrame(realSyncTick);
 
   // ---------------------------------------------------------------------
   // Envoi + polling (même logique que les autres onglets du hub)
