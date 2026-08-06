@@ -395,7 +395,11 @@ def build_ass(
     fond: str = "contour",
     text_case: str = "majuscule",
     accent_color_hex: str = "#ffd400",
+    italic: bool = False,
+    words_per_group: int = 3,
 ) -> str:
+    words_per_group = max(1, min(8, int(words_per_group or 3)))
+    karaoke_group_size = max(2, words_per_group)  # une ligne karaoké d'1 seul mot n'a pas de sens
     primary = _ass_color(color_hex)
     outline_c = _ass_color(outline_color_hex)
     accent = _ass_color(accent_color_hex)
@@ -430,9 +434,9 @@ def build_ass(
         "ScriptType: v4.00+\n"
         f"PlayResX: 1080\nPlayResY: {video_h}\n"
         "[V4+ Styles]\n"
-        "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, "
+        "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, Italic, "
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV\n"
-        f"Style: Default,{font_clean},{base_size},{primary},{outline_c},{back_colour},{bold},"
+        f"Style: Default,{font_clean},{base_size},{primary},{outline_c},{back_colour},{bold},{-1 if italic else 0},"
         f"{border_style},{outline_px},{shadow},{align},{margin_lr},{margin_lr},{marginv}\n"
         "[Events]\n"
         "Format: Layer, Start, End, Style, Text\n"
@@ -441,11 +445,20 @@ def build_ass(
     x_anchor, y_anchor = _position_anchor(position, video_h, marginv)
 
     def apply_case(s):
-        return s.upper() if text_case == "majuscule" else s
+        """Appliqué mot par mot (jamais sur un bloc multi-lignes déjà joint par \\N — sinon la
+        casse "Première lettre" ne capitalise que le tout premier caractère du bloc entier)."""
+        if text_case == "majuscule":
+            return s.upper()
+        if text_case == "capitalize":
+            def cap_word(w):
+                return "-".join((p[:1].upper() + p[1:].lower()) if p else p for p in w.split("-"))
+            return " ".join(cap_word(w) for w in s.split(" "))
+        return s
 
     def cue(start, end, text_lines):
-        text = apply_case(r"\N".join(text_lines))
-        fit_size = _fit_font_size(text_lines, base_size, ratio, avail_width)
+        cased_lines = [apply_case(l) for l in text_lines]
+        text = r"\N".join(cased_lines)
+        fit_size = _fit_font_size(cased_lines, base_size, ratio, avail_width)
         tags = f"\\fs{fit_size}" + _effect_tag(effect, max(end - start, 0.05), x_anchor, y_anchor)
         return f"Dialogue: 0,{_ass_ts(start)},{_ass_ts(end)},Default,{{{tags}}}{text}"
 
@@ -464,22 +477,24 @@ def build_ass(
             lines.append(cue(w["start"], w["end"], [w["text"]]))
 
     elif mode == "build_vertical":
-        # Chaque mot s'ajoute sur sa PROPRE ligne, empilé verticalement (reset tous les 3 mots).
+        # Chaque mot s'ajoute sur sa PROPRE ligne, empilé verticalement (reset tous les
+        # `words_per_group` mots).
         group = []
         for i, w in enumerate(words):
             group.append(w)
             end = next_start(words, i, w["end"])
             lines.append(cue(w["start"], end, [x["text"] for x in group]))
-            if len(group) >= 3:
+            if len(group) >= words_per_group:
                 group = []
 
     elif mode == "stack":
-        # "L'une au-dessus de l'autre" : pile déroulante des 3 dernières mini-lignes (2 mots
-        # chacune), la plus récente en bas, les précédentes remontent au-dessus.
+        # "L'une au-dessus de l'autre" : pile déroulante des 3 dernières mini-lignes
+        # (`words_per_group` mots chacune), la plus récente en bas, les précédentes remontent
+        # au-dessus.
         chunks, cur = [], []
         for w in words:
             cur.append(w)
-            if len(cur) >= 2:
+            if len(cur) >= words_per_group:
                 chunks.append(cur)
                 cur = []
         if cur:
@@ -501,7 +516,7 @@ def build_ass(
         groups, cur = [], []
         for w in words:
             cur.append(w)
-            if len(cur) >= 5:
+            if len(cur) >= karaoke_group_size:
                 groups.append(cur)
                 cur = []
         if cur:
@@ -522,13 +537,14 @@ def build_ass(
                 tags = f"\\fs{fit_size}" + _effect_tag(effect, max(end - start, 0.05), x_anchor, y_anchor)
                 lines.append(f"Dialogue: 0,{_ass_ts(start)},{_ass_ts(end)},Default,{{{tags}}}{text}")
 
-    else:  # "build" (défaut) — la ligne se construit mot après mot, wrap sur 2 lignes max, reset tous les 3 mots
+    else:  # "build" (défaut) — la ligne se construit mot après mot, wrap sur 2 lignes max,
+        # reset tous les `words_per_group` mots
         group = []
         for i, w in enumerate(words):
             group.append(w)
             end = next_start(words, i, w["end"])
             lines.append(cue(w["start"], end, _wrap_build_line(group)))
-            if len(group) >= 3:
+            if len(group) >= words_per_group:
                 group = []
 
     return header + "\n".join(lines) + "\n"
@@ -546,7 +562,7 @@ def run(cmd):
 def process_job(
     job_id, option, artiste, titre, upload_path: Path, font, font_weight, size_pct, color, mode,
     position="centre", effect="none", outline_color="#000000", outline_width="normal",
-    fond="contour", text_case="majuscule", accent_color="#ffd400",
+    fond="contour", text_case="majuscule", accent_color="#ffd400", italic=False, words_per_group=3,
 ):
     try:
         granularity = "mot" if (option == "video" and mode != "full") else "phrase"
@@ -614,7 +630,7 @@ def process_job(
                 words, mode, font, font_weight, float(size_pct), color, video_h,
                 position=position, effect=effect, outline_color_hex=outline_color,
                 outline_width=outline_width, fond=fond, text_case=text_case,
-                accent_color_hex=accent_color,
+                accent_color_hex=accent_color, italic=italic, words_per_group=int(words_per_group),
             ),
             encoding="utf-8",
         )
@@ -687,6 +703,8 @@ async def create_job(
     fond: str = Form("contour"),
     text_case: str = Form("majuscule"),
     accent_color: str = Form("#ffd400"),
+    italic: str = Form("false"),
+    words_per_group: str = Form("3"),
     file: UploadFile = File(...),
 ):
     conn = db()
@@ -708,6 +726,7 @@ async def create_job(
         kwargs=dict(
             position=position, effect=effect, outline_color=outline_color,
             outline_width=outline_width, fond=fond, text_case=text_case, accent_color=accent_color,
+            italic=str(italic).lower() in ("1", "true", "on", "yes"), words_per_group=words_per_group,
         ),
         daemon=True,
     ).start()

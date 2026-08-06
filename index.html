@@ -573,8 +573,22 @@
                   <label for="srt-case">Casse</label>
                   <select id="srt-case">
                     <option value="majuscule">MAJUSCULES</option>
+                    <option value="capitalize">Première Lettre</option>
                     <option value="normal">Normale</option>
                   </select>
+                </div>
+              </div>
+
+              <div class="field-row">
+                <div class="field">
+                  <label>Style de texte</label>
+                  <button type="button" class="toggle-pill" id="srt-italicToggle" aria-pressed="false">
+                    <span class="toggle-ico"><i>I</i></span><span>Italique</span>
+                  </button>
+                </div>
+                <div class="field">
+                  <label for="srt-groupSize">Mots par groupe <span id="srt-groupSizeVal">3</span></label>
+                  <input type="range" class="hslider" id="srt-groupSize" min="1" max="8" step="1" value="3" />
                 </div>
               </div>
 
@@ -682,10 +696,15 @@
         <div class="results-head">
           <h2>Résultat</h2>
         </div>
-        <a class="sp-button" id="srt-downloadLink" href="#" download>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Télécharger le résultat</span>
-        </a>
+        <div class="results-body">
+          <video class="result-video" id="srt-resultVideo" controls playsinline preload="metadata"></video>
+          <div class="results-actions">
+            <a class="sp-button" id="srt-downloadLink" href="#" download>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 19h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span>Télécharger le résultat</span>
+            </a>
+          </div>
+        </div>
       </div>
 
     </div>

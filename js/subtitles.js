@@ -30,6 +30,9 @@
   const outlineLabel = document.getElementById("srt-outlineLabel");
   const accentField = document.getElementById("srt-accentField");
   const accentColorInput = document.getElementById("srt-accentColor");
+  const italicToggle = document.getElementById("srt-italicToggle");
+  const groupSizeSlider = document.getElementById("srt-groupSize");
+  const groupSizeVal = document.getElementById("srt-groupSizeVal");
   const modeBtns = document.querySelectorAll("#srt-modeGroup .mode-btn");
 
   const previewPhone = document.getElementById("srt-previewPhone");
@@ -45,6 +48,7 @@
   const progressSteps = document.getElementById("srt-progressSteps");
   const resultsBox = document.getElementById("srt-resultsBox");
   const downloadLink = document.getElementById("srt-downloadLink");
+  const resultVideo = document.getElementById("srt-resultVideo");
 
   // ---------------------------------------------------------------------
   // Etat
@@ -151,6 +155,13 @@
     return (opt && opt.dataset.weight) || "700";
   }
 
+  function setItalic(on) {
+    italicToggle.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  function isItalic() {
+    return italicToggle.getAttribute("aria-pressed") === "true";
+  }
+
   function applyPreset(key) {
     presetChips.forEach((c) => c.classList.toggle("active", c.dataset.preset === key));
     if (key === "custom") return;
@@ -166,6 +177,9 @@
     outlineWidthSel.value = p.outlineWidth || "normal";
     caseSel.value = p.textCase || "majuscule";
     accentColorInput.value = p.accentColor || "#ffd400";
+    setItalic(!!p.italic);
+    groupSizeSlider.value = p.groupSize || 3;
+    groupSizeVal.textContent = groupSizeSlider.value;
     updateOutlineLabel();
     setMode(p.mode, true);
     updatePreviewStyle();
@@ -188,6 +202,12 @@
   outlineColorInput.addEventListener("input", () => { markCustom(); updatePreviewStyle(); });
   outlineWidthSel.addEventListener("change", () => { markCustom(); updatePreviewStyle(); });
   accentColorInput.addEventListener("input", () => { markCustom(); restartPreviewAnim(); });
+  italicToggle.addEventListener("click", () => { setItalic(!isItalic()); markCustom(); updatePreviewStyle(); });
+  groupSizeSlider.addEventListener("input", () => {
+    groupSizeVal.textContent = groupSizeSlider.value;
+    markCustom();
+    restartPreviewAnim();
+  });
   updateOutlineLabel();
 
   // ---------------------------------------------------------------------
@@ -202,7 +222,13 @@
   let currentFrameIdx = 0;
 
   function applyCase(s) {
-    return caseSel.value === "majuscule" ? s.toUpperCase() : s;
+    if (caseSel.value === "majuscule") return s.toUpperCase();
+    if (caseSel.value === "capitalize") {
+      return s.split(" ").map((w) =>
+        w.split("-").map((p) => (p ? p[0].toUpperCase() + p.slice(1).toLowerCase() : p)).join("-")
+      ).join(" ");
+    }
+    return s;
   }
 
   function wrapBuildLine(group) {
@@ -216,6 +242,7 @@
   function buildPreviewFrames(mode) {
     const W = PREVIEW_WORDS;
     const frames = [];
+    const groupSize = Math.max(1, Math.min(8, parseInt(groupSizeSlider.value, 10) || 3));
 
     if (mode === "full") {
       return [{ lines: ["Il remet rendez-vous", "à demain"], active: -1 }];
@@ -231,7 +258,7 @@
       W.forEach((w) => {
         group.push(w);
         frames.push({ lines: wrapBuildLine(group), active: -1 });
-        if (group.length >= 3) group = [];
+        if (group.length >= groupSize) group = [];
       });
       return frames;
     }
@@ -241,14 +268,14 @@
       W.forEach((w) => {
         group.push(w);
         frames.push({ lines: group.slice(), active: -1 });
-        if (group.length >= 3) group = [];
+        if (group.length >= groupSize) group = [];
       });
       return frames;
     }
 
     if (mode === "stack") {
       const chunks = [];
-      for (let i = 0; i < W.length; i += 2) chunks.push(W.slice(i, i + 2).join(" "));
+      for (let i = 0; i < W.length; i += groupSize) chunks.push(W.slice(i, i + groupSize).join(" "));
       let win = [];
       chunks.forEach((c) => {
         win.push(c);
@@ -259,8 +286,9 @@
     }
 
     if (mode === "karaoke") {
-      for (let g = 0; g < W.length; g += 5) {
-        const group = W.slice(g, g + 5);
+      const kSize = Math.max(2, groupSize);
+      for (let g = 0; g < W.length; g += kSize) {
+        const group = W.slice(g, g + kSize);
         group.forEach((_, i) => frames.push({ lines: [group.join(" ")], active: i, groupWords: group }));
       }
       return frames;
@@ -309,6 +337,7 @@
   function updatePreviewStyle() {
     previewText.style.fontFamily = fontSel.value;
     previewText.style.fontWeight = selectedFontWeight();
+    previewText.style.fontStyle = isItalic() ? "italic" : "normal";
     previewText.style.color = colorInput.value;
 
     const posMap = { haut: "flex-start", centre: "center", bas: "flex-end" };
@@ -451,6 +480,13 @@
           progressLabel.style.color = "var(--ok)";
           if (data.download_url) {
             downloadLink.href = data.download_url;
+            if (data.option === "video") {
+              resultVideo.src = data.download_url;
+              resultVideo.load();
+            } else {
+              resultVideo.removeAttribute("src");
+              resultVideo.load();
+            }
             resultsBox.classList.add("show");
           }
         }
@@ -492,10 +528,15 @@
       fd.append("fond", fondSel.value);
       fd.append("text_case", caseSel.value);
       fd.append("accent_color", accentColorInput.value);
+      fd.append("italic", isItalic() ? "true" : "false");
+      fd.append("words_per_group", groupSizeSlider.value);
     }
 
     goBtn.disabled = true;
     resultsBox.classList.remove("show");
+    resultVideo.pause();
+    resultVideo.removeAttribute("src");
+    resultVideo.load();
     const steps = currentOption === "video" ? VIDEO_STEPS : FILE_STEPS;
     progressBox.classList.add("show");
     renderSteps(steps, {});
