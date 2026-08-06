@@ -224,6 +224,26 @@
     return Promise.resolve(window.confirm("Des modifications non enregistrées seront perdues. Continuer ?"));
   }
 
+  /* ---------------------------- Modale générique : confirmation avant suppression ---------------------------- */
+  // Remplace window.confirm() (moche, incohérent avec le reste du site) pour
+  // toutes les actions destructives — projet, sous-poste, dépense.
+  const confirmOverlay = document.getElementById("budget-confirm-overlay");
+  let confirmResolve = null;
+  function askConfirm(message, opts) {
+    opts = opts || {};
+    document.getElementById("budget-confirm-title").textContent = opts.title || "Es-tu sûr ?";
+    document.getElementById("budget-confirm-message").textContent = message;
+    document.getElementById("budget-confirm-ok").textContent = opts.okLabel || "🗑 Supprimer";
+    confirmOverlay.classList.remove("hidden");
+    return new Promise((resolve) => { confirmResolve = resolve; });
+  }
+  function closeConfirm(result) {
+    confirmOverlay.classList.add("hidden");
+    if (confirmResolve) { confirmResolve(result); confirmResolve = null; }
+  }
+  document.getElementById("budget-confirm-cancel").addEventListener("click", () => closeConfirm(false));
+  document.getElementById("budget-confirm-ok").addEventListener("click", () => closeConfirm(true));
+
   /* ---------------------------- Calcul local (miroir de compute_totals côté backend) ---------------------------- */
   function num(v) { const n = parseFloat(v); return isFinite(n) ? n : 0; }
   function ratio(a, b) { return b ? a / b : null; }
@@ -315,7 +335,6 @@
           html += numCell("Réalisé", '<div class="budget-num budget-num-ro budget-num-realise">' + fmtEur(sp.realise) + "</div>");
           html += ratioBadges(sp.ratios);
           html += "</div>";
-          html += '<button type="button" class="admin-btn-icon budget-add-dep-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" title="Ajouter une dépense">＋</button>';
           html += '<button type="button" class="admin-btn-icon admin-btn-icon-danger budget-del-sp-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" title="Supprimer ce sous-poste">🗑</button>';
           html += "</div>";
           html += '<div class="budget-dep-cols"><span class="budget-dep-col-label"></span><span class="budget-dep-col-label">Fournisseur</span><span class="budget-dep-col-label">Prévisionnel</span><span class="budget-dep-col-label budget-dep-col-realise">Réalisé</span><span class="budget-dep-col-label budget-dep-col-spacer"></span></div>';
@@ -328,6 +347,10 @@
             html += '<button type="button" class="admin-btn-icon admin-btn-icon-danger budget-del-dep-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '" data-dep="' + depIdx + '" title="Supprimer cette dépense">🗑</button>';
             html += "</div>";
           });
+          // "+ Ajouter une dépense" en pied de liste (façon "+ ajouter une ligne") —
+          // plus intuitif et plus sûr que la petite icône du haut, trop proche du
+          // 🗑 de suppression du sous-poste (Michel : "meilleur endroit + intuitif").
+          html += '<button type="button" class="admin-btn admin-btn-ghost admin-btn-sm budget-add-dep-btn" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '">+ Ajouter une dépense</button>';
           html += "</div>";
         } else {
           html += '<div class="budget-sp budget-sp-simple" data-cat="' + escAttr(catName) + '" data-sp="' + spIdx + '">';
@@ -439,19 +462,24 @@
       });
     });
     contentEl.querySelectorAll(".budget-del-sp-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        if (!window.confirm("Supprimer ce sous-poste et tout son contenu ?")) return;
+      btn.addEventListener("click", async () => {
         const cat = catByName(btn.dataset.cat);
-        if (!cat) return;
+        const sp = cat && cat.sous_postes[parseInt(btn.dataset.sp, 10)];
+        if (!cat || !sp) return;
+        const ok = await askConfirm('Supprimer le sous-poste « ' + sp.name + ' » et toutes ses dépenses ?');
+        if (!ok) return;
         cat.sous_postes.splice(parseInt(btn.dataset.sp, 10), 1);
         markDirty();
       });
     });
     contentEl.querySelectorAll(".budget-del-dep-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", async () => {
         const cat = catByName(btn.dataset.cat);
         const sp = cat && cat.sous_postes[parseInt(btn.dataset.sp, 10)];
-        if (!sp) return;
+        const dep = sp && sp.depenses[parseInt(btn.dataset.dep, 10)];
+        if (!sp || !dep) return;
+        const ok = await askConfirm('Supprimer la dépense « ' + (dep.label || "sans nom") + ' » ?');
+        if (!ok) return;
         sp.depenses.splice(parseInt(btn.dataset.dep, 10), 1);
         markDirty();
       });
@@ -668,7 +696,11 @@
       toast("Impossible de supprimer le dernier projet d'un artiste.", "err");
       return;
     }
-    if (!window.confirm("Supprimer le projet « " + currentProject + " » et tout son contenu ? Cette action est définitive.")) return;
+    const ok = await askConfirm(
+      "Supprimer le projet « " + currentProject + " » et tout son contenu ? Cette action est définitive.",
+      { title: "Supprimer ce projet ?" }
+    );
+    if (!ok) return;
     try {
       const resp = await callBudget(
         "/admin/budget/file/" + encodeURIComponent(currentArtist.fileId) +

@@ -1,10 +1,18 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-multipart==0.0.9
-faster-whisper==1.0.3
+faster-whisper==1.2.1
 requests==2.32.3
 huggingface_hub==0.24.6
 boto3==1.34.162
 Pillow==10.4.0
 anthropic==0.120.2
 openpyxl==3.1.5
+# WhisperX : alignement mot-par-mot forcé (wav2vec2) sur un texte déjà connu (Flowstage vérifié
+# ou correction Claude) — remplace l'interpolation au prorata des caractères par un vrai timing
+# calé sur l'audio, <100ms de précision (testé en direct). Tire torch/torchaudio/pyannote-audio
+# en dépendances transitives (~1,2 Go d'installation) — impact réel sur la taille de l'image
+# Docker et le temps de build, à surveiller sur Render. Le modèle d'alignement n'est PAS gardé
+# en mémoire en permanence (voir _whisperx_align_words dans main.py) pour limiter le risque
+# d'OOM en cumul avec le modèle whisper principal.
+whisperx==3.8.6

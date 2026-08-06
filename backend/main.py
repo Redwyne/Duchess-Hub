@@ -415,7 +415,52 @@ def _interpolate_words(lines_abs):
     return words
 
 
-def get_flowstage_words(aesthetic_id: str, granularity: str, expected_duration_s: float = 0.0):
+_WHISPERX_LANG = "fr"
+
+
+def _whisperx_align_words(phrases, audio_path):
+    """Aligne un texte DÉJÀ CONNU comme juste (lignes Flowstage vérifiées, ou lignes corrigées
+    par Claude) sur l'audio réel via WhisperX (modèle wav2vec2 de forced alignment) — un timing
+    mot par mot bien plus précis (<100ms, testé en direct) que l'interpolation au prorata des
+    caractères de `_interpolate_words`, qui n'a elle aucune idée de l'audio réel. Contrairement
+    au modèle whisper principal, le modèle d'alignement N'EST PAS gardé en mémoire en permanence
+    (~1,4 Go le temps de l'appel, chargé à la demande puis explicitement libéré) pour ne pas
+    cumuler avec le modèle whisper (~1,5 Go) + un éventuel burn-in ffmpeg sur le même conteneur
+    (risque d'OOM déjà rencontré une fois sur ce projet, voir docs). Renvoie None si l'alignement
+    échoue pour n'importe quelle raison (dépendance absente, erreur modèle...) — jamais bloquant,
+    l'appelant retombe alors sur `_interpolate_words`."""
+    if not phrases or not audio_path:
+        return None
+    model_a = None
+    try:
+        import gc
+        import whisperx
+
+        model_a, metadata = whisperx.load_align_model(language_code=_WHISPERX_LANG, device="cpu")
+        audio = whisperx.load_audio(str(audio_path))
+        segments = [{"text": p["text"], "start": p["start"], "end": p["end"]} for p in phrases]
+        result = whisperx.align(segments, model_a, metadata, audio, "cpu", return_char_alignments=False)
+        words = []
+        for seg in result.get("segments", []):
+            for w in seg.get("words", []):
+                if "start" not in w or "end" not in w:
+                    continue  # whisperx omet le timing d'un mot si son score de confiance est trop bas
+                words.append({"text": w["word"], "start": float(w["start"]), "end": float(w["end"])})
+        return words or None
+    except Exception as e:  # noqa: BLE001
+        print(f"[WhisperX] alignement échoué, repli sur l'interpolation par caractères: {e}")
+        return None
+    finally:
+        if model_a is not None:
+            del model_a
+        try:
+            import gc
+            gc.collect()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def get_flowstage_words(aesthetic_id: str, granularity: str, expected_duration_s: float = 0.0, audio_path=None):
     """Récupère les paroles de l'aesthetic Flowstage donnée.
 
     Piège découvert en test réel : le champ "audios" d'une aesthetic ne contient pas forcément
@@ -482,7 +527,9 @@ def get_flowstage_words(aesthetic_id: str, granularity: str, expected_duration_s
     if not lines_abs:
         return None
 
-    return lines_abs if granularity == "phrase" else _interpolate_words(lines_abs)
+    if granularity == "phrase":
+        return lines_abs
+    return _whisperx_align_words(lines_abs, audio_path) or _interpolate_words(lines_abs)
 
 
 def _cache_timing(single_cle: str, granularity: str, words, source: str):
@@ -576,7 +623,7 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
             aesthetic = find_flowstage_aesthetic(artiste, titre, aesthetic_hint)
             if aesthetic:
                 expected_duration = _probe_audio_duration(audio_path)
-                fs_words = get_flowstage_words(aesthetic["id"], granularity, expected_duration_s=expected_duration)
+                fs_words = get_flowstage_words(aesthetic["id"], granularity, expected_duration_s=expected_duration, audio_path=audio_path)
                 if fs_words:
                     fs_words = _merge_apostrophe_words(fs_words)
                     _cache_timing(single_cle, granularity, fs_words, "flowstage")
@@ -592,7 +639,7 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
         # peut rattraper des erreurs que la grammaire seule ne pouvait pas voir.
         needs_retry = source == "audio_uploade" or (source == "audio_uploade_corrige_claude" and reference_lyrics.strip())
         if needs_retry and ANTHROPIC_API_KEY:
-            corrected = _apply_claude_correction(words, granularity, artiste, titre, reference_lyrics)
+            corrected = _apply_claude_correction(words, granularity, artiste, titre, reference_lyrics, audio_path)
             if corrected:
                 words = corrected
                 source = "audio_uploade_corrige_claude"
@@ -603,7 +650,7 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
         aesthetic = find_flowstage_aesthetic(artiste, titre, aesthetic_hint)
         if aesthetic:
             expected_duration = _probe_audio_duration(audio_path)
-            words = get_flowstage_words(aesthetic["id"], granularity, expected_duration_s=expected_duration)
+            words = get_flowstage_words(aesthetic["id"], granularity, expected_duration_s=expected_duration, audio_path=audio_path)
             if words:
                 words = _merge_apostrophe_words(words)
                 _cache_timing(single_cle, granularity, words, "flowstage")
@@ -612,7 +659,7 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
     words = transcribe(audio_path, granularity)
     words = _merge_apostrophe_words(words)
     source = "audio_uploade"
-    corrected = _apply_claude_correction(words, granularity, artiste, titre, reference_lyrics)
+    corrected = _apply_claude_correction(words, granularity, artiste, titre, reference_lyrics, audio_path)
     if corrected:
         words = corrected
         source = "audio_uploade_corrige_claude"
@@ -766,12 +813,15 @@ def correct_lyrics_with_claude(phrases, artiste: str = "", titre: str = "", refe
         return None
 
 
-def _apply_claude_correction(words, granularity: str, artiste: str = "", titre: str = "", reference_lyrics: str = ""):
+def _apply_claude_correction(words, granularity: str, artiste: str = "", titre: str = "", reference_lyrics: str = "", audio_path=None):
     """Applique correct_lyrics_with_claude() sur une liste de mots OU de phrases (selon
     `granularity`) et reconstruit le même format en sortie. Pour la granularité "mot", le
-    timing mot par mot est ré-interpolé à partir des lignes corrigées — exactement la même
-    mécanique que pour les lignes Flowstage (_interpolate_words). Renvoie None si la correction
-    n'a pas pu être appliquée (clé absente, échec API, désaccord de nombre de lignes)."""
+    timing mot par mot est recalculé à partir des lignes corrigées via WhisperX (alignement
+    forcé sur l'audio réel, <100ms de précision — voir _whisperx_align_words) si `audio_path`
+    est fourni, sinon on retombe sur l'interpolation au prorata des caractères
+    (_interpolate_words, moins précise mais ne dépend pas d'avoir le fichier audio sous la
+    main). Renvoie None si la correction n'a pas pu être appliquée (clé absente, échec API,
+    désaccord de nombre de lignes)."""
     if not ANTHROPIC_API_KEY or not words:
         return None
     phrases = words if granularity == "phrase" else _words_to_phrases(words)
@@ -786,7 +836,7 @@ def _apply_claude_correction(words, granularity: str, artiste: str = "", titre: 
     ]
     if granularity == "phrase":
         return corrected_phrases
-    return _interpolate_words(corrected_phrases)
+    return _whisperx_align_words(corrected_phrases, audio_path) or _interpolate_words(corrected_phrases)
 
 
 # --------------------------------------------------------------------------

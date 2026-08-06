@@ -37,7 +37,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV DATA_DIR=/app/data
-ENV WHISPER_MODEL=small
+# "small" produisait trop d'erreurs d'homophones ("il s'aime" au lieu de "ils s'aiment") —
+# passé à "medium" (le code par défaut dans main.py l'était déjà, mais cette variable ENV du
+# Dockerfile la SURCHARGEAIT silencieusement à "small" à chaque déploiement, annulant le
+# changement — bug trouvé en relisant le Dockerfile, pas en testant le code Python seul).
+ENV WHISPER_MODEL=medium
 
 EXPOSE 8000
 
