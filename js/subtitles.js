@@ -687,17 +687,31 @@
     restartPreviewAnim();
   }
 
+  // Seuil de silence (secondes) au-delà duquel on considère qu'une nouvelle phrase/ligne
+  // commence — même heuristique que _words_to_phrases() côté backend, pour que le regroupement
+  // visuel colle à ce qui sera utilisé pour le mode "Phrase entière"/l'export .srt.
+  const VERIFY_LINE_GAP = 0.6;
+
   function renderVerifyWords() {
     verifyWordsEl.innerHTML = "";
-    if (!editedWords) return;
+    if (!editedWords || !editedWords.length) return;
+    let lineEl = null;
+    let lineIdx = -1;
     editedWords.forEach((w, i) => {
+      const isNewLine = i === 0 || (w.start - editedWords[i - 1].end) > VERIFY_LINE_GAP;
+      if (isNewLine) {
+        lineIdx++;
+        lineEl = document.createElement("div");
+        lineEl.className = "verify-line verify-line-" + (lineIdx % 6);
+        verifyWordsEl.appendChild(lineEl);
+      }
       const chip = document.createElement("span");
       chip.className = "verify-word";
       chip.textContent = w.text;
       chip.dataset.index = String(i);
       chip.draggable = true;
-      chip.title = formatTime(w.start) + " – " + formatTime(w.end) + " · double-clique pour corriger, glisse-dépose pour échanger avec un autre mot";
-      chip.addEventListener("dblclick", () => editWordChip(chip, i));
+      chip.title = formatTime(w.start) + " – " + formatTime(w.end) + " · clique pour corriger (Suppr efface le mot), glisse-dépose pour échanger avec un autre mot";
+      chip.addEventListener("click", () => editWordChip(chip, i));
       chip.addEventListener("dragstart", (e) => {
         dragFromIndex = i;
         chip.classList.add("dragging");
@@ -720,7 +734,7 @@
         verifyStatus.textContent = "Mots échangés ✓";
         syncEditsToPreview();
       });
-      verifyWordsEl.appendChild(chip);
+      lineEl.appendChild(chip);
     });
   }
 
@@ -731,7 +745,7 @@
     input.value = editedWords[i].text;
     chip.replaceWith(input);
     input.focus();
-    input.select();
+    input.select(); // texte présélectionné : taper remplace tout, Suppr/Retour arrière (sans avoir retapé) efface le mot entier
     let committed = false;
     const commit = () => {
       if (committed) return;
@@ -742,22 +756,62 @@
       verifyStatus.textContent = "Correction enregistrée ✓";
       syncEditsToPreview();
     };
-    input.addEventListener("blur", commit);
+    const deleteWord = () => {
+      committed = true;
+      editedWords.splice(i, 1);
+      renderVerifyWords();
+      verifyStatus.textContent = "Mot supprimé ✓";
+      syncEditsToPreview();
+    };
     input.addEventListener("keydown", (e) => {
+      if (
+        (e.key === "Delete" || e.key === "Backspace") &&
+        input.selectionStart === 0 &&
+        input.selectionEnd === input.value.length
+      ) {
+        // Le mot est toujours entièrement sélectionné (aucune frappe depuis le clic) : Suppr /
+        // Retour arrière supprime le mot au lieu d'effacer juste son texte.
+        e.preventDefault();
+        deleteWord();
+        return;
+      }
       if (e.key === "Enter") { e.preventDefault(); input.blur(); }
       if (e.key === "Escape") { committed = true; renderVerifyWords(); }
     });
+    input.addEventListener("blur", commit);
   }
 
   function normalizeWordForMatch(s) {
     return (s || "").toLowerCase().replace(/[.,!?;:"'’()]/g, "");
   }
 
+  // Le champ "Remplacer par" vide indique une suppression en masse plutôt qu'un remplacement —
+  // le libellé du bouton s'ajuste pour que ce soit clair.
+  bulkTo.addEventListener("input", () => {
+    bulkApplyBtn.textContent = bulkTo.value.trim() ? "Remplacer partout" : "Supprimer partout";
+  });
+
   bulkApplyBtn.addEventListener("click", () => {
     const from = bulkFrom.value.trim();
     const to = bulkTo.value.trim();
-    if (!from || !to || !editedWords) return;
+    if (!from || !editedWords) return;
     const fromNorm = normalizeWordForMatch(from);
+
+    if (!to) {
+      // Bulk suppression : retire tous les mots correspondants d'un coup.
+      const before = editedWords.length;
+      editedWords = editedWords.filter((w) => normalizeWordForMatch(w.text) !== fromNorm);
+      const removed = before - editedWords.length;
+      if (removed > 0) {
+        renderVerifyWords();
+        syncEditsToPreview();
+        verifyStatus.textContent = removed + " occurrence(s) de « " + from + " » supprimée(s).";
+      } else {
+        verifyStatus.textContent = "Aucune occurrence de « " + from + " » trouvée.";
+      }
+      return;
+    }
+
     let count = 0;
     editedWords.forEach((w) => {
       if (normalizeWordForMatch(w.text) === fromNorm) {

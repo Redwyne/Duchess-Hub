@@ -511,6 +511,38 @@
           </div>
         </div>
 
+        <div class="verify-block" id="srt-verifyBlock" style="display:none;">
+          <div class="field">
+            <label>Vérifier les paroles <span class="hl" style="font-weight:600;">corrige avant de générer</span></label>
+            <div class="hint" id="srt-verifyHint">Choisis d'abord un fichier.</div>
+          </div>
+
+          <div class="verify-player">
+            <button type="button" class="verify-playBtn" id="srt-verifyPlay" aria-label="Lecture">▶</button>
+            <div class="verify-wave" id="srt-verifyWave">
+              <canvas id="srt-waveCanvas"></canvas>
+              <div class="verify-playhead" id="srt-verifyPlayhead"></div>
+            </div>
+            <span class="verify-time" id="srt-verifyTime">0:00 / 0:00</span>
+          </div>
+
+          <div class="verify-bulk">
+            <input type="text" id="srt-bulkFrom" placeholder="Mot à corriger (ex: mansion)" />
+            <span class="verify-arrow">→</span>
+            <input type="text" id="srt-bulkTo" placeholder="Remplacer par (vide = supprimer)" />
+            <button type="button" class="verify-btn" id="srt-bulkApply">Remplacer partout</button>
+          </div>
+
+          <div class="verify-words" id="srt-verifyWords"></div>
+
+          <div class="verify-actions">
+            <button type="button" class="verify-btn" id="srt-verifyReset">Annuler mes corrections</button>
+            <span class="verify-status" id="srt-verifyStatus"></span>
+          </div>
+
+          <audio id="srt-verifyAudio" hidden></audio>
+        </div>
+
         <div class="style-block" id="srt-styleBlock">
           <div class="field">
             <label>Préréglages <span class="hl" style="font-weight:600;">repérés dans le catalogue Duchess</span></label>
@@ -676,38 +708,6 @@
               <div class="preview-caption" id="srt-previewCaption">Aperçu texte (pas encore le rendu vidéo réel)</div>
             </div>
           </div>
-        </div>
-
-        <div class="verify-block" id="srt-verifyBlock" style="display:none;">
-          <div class="field">
-            <label>Vérifier les paroles <span class="hl" style="font-weight:600;">corrige avant de générer</span></label>
-            <div class="hint" id="srt-verifyHint">Choisis d'abord un fichier.</div>
-          </div>
-
-          <div class="verify-player">
-            <button type="button" class="verify-playBtn" id="srt-verifyPlay" aria-label="Lecture">▶</button>
-            <div class="verify-wave" id="srt-verifyWave">
-              <canvas id="srt-waveCanvas"></canvas>
-              <div class="verify-playhead" id="srt-verifyPlayhead"></div>
-            </div>
-            <span class="verify-time" id="srt-verifyTime">0:00 / 0:00</span>
-          </div>
-
-          <div class="verify-bulk">
-            <input type="text" id="srt-bulkFrom" placeholder="Mot à corriger (ex: mansion)" />
-            <span class="verify-arrow">→</span>
-            <input type="text" id="srt-bulkTo" placeholder="Remplacer par (ex: maison)" />
-            <button type="button" class="verify-btn" id="srt-bulkApply">Remplacer partout</button>
-          </div>
-
-          <div class="verify-words" id="srt-verifyWords"></div>
-
-          <div class="verify-actions">
-            <button type="button" class="verify-btn" id="srt-verifyReset">Annuler mes corrections</button>
-            <span class="verify-status" id="srt-verifyStatus"></span>
-          </div>
-
-          <audio id="srt-verifyAudio" hidden></audio>
         </div>
 
         <button class="go" id="srt-go" type="submit">Go</button>
