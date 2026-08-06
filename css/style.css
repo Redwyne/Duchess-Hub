@@ -5,23 +5,62 @@
   --card: #16161d;
   --border: #26262f;
   --border-soft: #1e1e26;
+  --sunken: #0d0d11;
   --text: #f4f4f8;
   --muted: #93939f;
   --muted-2: #67676f;
   --ok: #2ecc71;
   --err: #ff5c5c;
   --warn: #f0ab3d;
+  --tip-text: #e3b568;
+  --shadow-color: rgba(0,0,0,0.6);
   --radius-lg: 22px;
   --radius-md: 14px;
   --radius-sm: 9px;
   --font-head: "Space Grotesk", "Inter", sans-serif;
   --font-body: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  color-scheme: dark;
 
   /* Theme par defaut (onglet Pitch) — surchargee par body[data-tab] ci-dessous */
   --accent: #3d7dfc;
   --accent-2: #5ec8f2;
   --accent-3: #2f5fd6;
   --accent-soft: rgba(61, 125, 252, 0.14);
+}
+
+/* ---------------- Mode clair ---------------- */
+/* Basculé via data-theme="light" sur <html> (voir js/theme.js). Seules les
+   teintes neutres changent — les couleurs d'accent par onglet restent les
+   mêmes, elles sont déjà assez saturées pour rester lisibles sur fond clair. */
+html[data-theme="light"] {
+  --bg: #f5f5f8;
+  --panel: #ffffff;
+  --panel-2: #f0f0f4;
+  --card: #ffffff;
+  --border: #e1e1e8;
+  --border-soft: #eaeaf0;
+  --sunken: #eef0f4;
+  --text: #15151b;
+  --muted: #5b5b68;
+  --muted-2: #83838f;
+  --tip-text: #8a5a12;
+  --shadow-color: rgba(20,20,30,0.12);
+  color-scheme: light;
+}
+
+/* Décor de fond pensé pour un fond sombre à l'origine : on l'adoucit et on
+   inverse ce qui doit l'être pour que ça reste discret sur fond clair. */
+html[data-theme="light"] .grid-overlay {
+  background-image:
+    linear-gradient(rgba(10,10,25,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(10,10,25,0.05) 1px, transparent 1px);
+}
+html[data-theme="light"] .blob-a { opacity: 0.25; }
+html[data-theme="light"] .blob-b { opacity: 0.16; }
+html[data-theme="light"] .blob-c { opacity: 0.12; }
+html[data-theme="light"] .brand-logo,
+html[data-theme="light"] .bg-logo {
+  filter: invert(1);
 }
 
 /* ---------------- Themes par onglet ---------------- */
@@ -182,7 +221,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 5px;
@@ -215,6 +254,32 @@ body {
   margin-left: 6px;
   vertical-align: middle;
 }
+
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.theme-toggle {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: all .15s;
+}
+.theme-toggle:hover { color: var(--text); border-color: var(--accent); }
+.theme-toggle .icon-moon { display: none; }
+html[data-theme="light"] .theme-toggle .icon-sun { display: none; }
+html[data-theme="light"] .theme-toggle .icon-moon { display: inline; }
 
 /* ---------------- Tab panels ---------------- */
 
@@ -389,7 +454,7 @@ body {
   border-radius: var(--radius-md);
   padding: 14px 16px;
   font-size: 12.5px;
-  color: #e3b568;
+  color: var(--tip-text);
   line-height: 1.5;
   display: flex;
   gap: 10px;
@@ -405,7 +470,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: clamp(28px, 4vw, 44px);
-  box-shadow: 0 30px 80px -30px rgba(0,0,0,0.6);
+  box-shadow: 0 30px 80px -30px var(--shadow-color);
 }
 
 .panel-head { margin-bottom: 30px; }
@@ -434,7 +499,7 @@ label {
 
 input, textarea, select {
   width: 100%;
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 13px 15px;
@@ -466,7 +531,7 @@ textarea { resize: vertical; min-height: 76px; }
 @media (max-width: 560px) { .modes { grid-template-columns: repeat(2, 1fr); } }
 
 .mode-btn {
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 14px 8px;
@@ -556,7 +621,7 @@ textarea { resize: vertical; min-height: 76px; }
   direction: rtl;
   width: 6px;
   height: 130px;
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border);
   border-radius: 999px;
   outline: none;
@@ -584,7 +649,7 @@ textarea { resize: vertical; min-height: 76px; }
   cursor: pointer;
 }
 .vslider::-moz-range-track {
-  background: #0d0d11;
+  background: var(--sunken);
   border-radius: 999px;
   width: 6px;
 }
@@ -594,7 +659,7 @@ textarea { resize: vertical; min-height: 76px; }
 
 .lang-toggle {
   display: inline-flex;
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 4px;
@@ -655,7 +720,7 @@ textarea { resize: vertical; min-height: 76px; }
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 28px clamp(22px, 4vw, 36px);
-  box-shadow: 0 30px 80px -30px rgba(0,0,0,0.6);
+  box-shadow: 0 30px 80px -30px var(--shadow-color);
 }
 .progress-box.show { display: block; }
 
@@ -687,7 +752,7 @@ textarea { resize: vertical; min-height: 76px; }
 .progress-track {
   width: 100%;
   height: 12px;
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border);
   border-radius: 999px;
   overflow: hidden;
@@ -734,7 +799,7 @@ textarea { resize: vertical; min-height: 76px; }
   gap: 10px;
   font-size: 12.5px;
   color: var(--muted-2);
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
@@ -857,7 +922,7 @@ textarea { resize: vertical; min-height: 76px; }
 
 .mini-btn {
   flex: 1;
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 9px 10px;
@@ -959,7 +1024,7 @@ textarea { resize: vertical; min-height: 76px; }
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: clamp(32px, 5vw, 56px);
-  box-shadow: 0 30px 80px -30px rgba(0,0,0,0.6);
+  box-shadow: 0 30px 80px -30px var(--shadow-color);
 }
 .placeholder-card .guide-kicker { margin-bottom: 16px; }
 .placeholder-card h1 {
@@ -992,7 +1057,7 @@ textarea { resize: vertical; min-height: 76px; }
 @media (max-width: 640px) { .option-toggle { grid-template-columns: 1fr; } }
 
 .option-btn {
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 18px 16px;
@@ -1042,7 +1107,7 @@ textarea { resize: vertical; min-height: 76px; }
   margin-bottom: 4px;
 }
 .preset-chip {
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 8px 14px;
@@ -1074,7 +1139,7 @@ textarea { resize: vertical; min-height: 76px; }
   appearance: none;
   width: 100%;
   height: 6px;
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border);
   border-radius: 999px;
   outline: none;

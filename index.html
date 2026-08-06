@@ -3,6 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script>
+  // Applique le thème (clair/sombre) avant le premier rendu pour éviter un
+  // flash de l'ancien thème au chargement. Doit rester tout en haut du head.
+  (function () {
+    try {
+      var saved = localStorage.getItem("duchess-hub-theme");
+      var theme = saved === "light" || saved === "dark" ? saved : "dark";
+      document.documentElement.setAttribute("data-theme", theme);
+    } catch (e) {}
+  })();
+</script>
 <title>Duchess · Hub</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -26,14 +37,19 @@
     <img src="assets/logo-white.png" alt="Duchess" class="brand-logo" />
     <span class="brand-text">DUCHESS <em>· Hub</em></span>
   </div>
-  <nav class="tabnav">
-    <button type="button" class="tab-btn" data-tab-target="pitch">Pitch</button>
-    <button type="button" class="tab-btn" data-tab-target="tiktok">TikTok</button>
-    <button type="button" class="tab-btn" data-tab-target="stats">Stats<span class="soon-dot" title="Bientôt"></span></button>
-    <button type="button" class="tab-btn" data-tab-target="srt">Sous-titres</button>
-    <button type="button" class="tab-btn" data-tab-target="strategie">Stratégie<span class="soon-dot" title="Bientôt"></span></button>
-    <button type="button" class="tab-btn" data-tab-target="admin">🔒 Admin</button>
-  </nav>
+  <div class="nav-right">
+    <nav class="tabnav">
+      <button type="button" class="tab-btn" data-tab-target="pitch">Pitch</button>
+      <button type="button" class="tab-btn" data-tab-target="tiktok">TikTok</button>
+      <button type="button" class="tab-btn" data-tab-target="stats">Stats<span class="soon-dot" title="Bientôt"></span></button>
+      <button type="button" class="tab-btn" data-tab-target="srt">Sous-titres</button>
+      <button type="button" class="tab-btn" data-tab-target="strategie">Stratégie<span class="soon-dot" title="Bientôt"></span></button>
+      <button type="button" class="tab-btn" data-tab-target="admin">🔒 Admin</button>
+    </nav>
+    <button type="button" class="theme-toggle" id="theme-toggle" title="Changer de thème" aria-label="Changer de thème">
+      <span class="icon-sun">☀️</span><span class="icon-moon">🌙</span>
+    </button>
+  </div>
 </header>
 
 <!-- ============================= ONGLET PITCH ============================= -->
@@ -778,6 +794,7 @@
 
 <div class="admin-toast-container" id="admin-toast-container"></div>
 
+<script src="js/theme.js"></script>
 <script src="js/tabs.js"></script>
 <script src="js/shared.js"></script>
 <script src="js/pitch.js"></script>

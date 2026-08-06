@@ -24,7 +24,10 @@ Etat v2 (styles étendus) :
   l'audio extrait du fichier uploadé pour l'instant. TODO une fois la clé fournie.
 """
 
+import base64
 import datetime
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -32,13 +35,16 @@ import shutil
 import sqlite3
 import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, Form, UploadFile, File
+import requests
+from fastapi import Body, Depends, FastAPI, Form, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 # --------------------------------------------------------------------------
 # Config
@@ -52,6 +58,25 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL", "small")
 DB_PATH = DATA_DIR / "app.db"
+
+# --------------------------------------------------------------------------
+# Onglet Admin — auth + proxy vers les scénarios Make (inventaire OneDrive)
+# --------------------------------------------------------------------------
+# Rien de secret ici : ADMIN_AUTH_SECRET, ADMIN_USERS et les 4 URLs de webhook
+# Make sont lus depuis les variables d'environnement Render (Dashboard Render
+# > service backend > Environment). Ne JAMAIS les committer dans le repo — le
+# front (js/admin.js) ne connaît plus aucun de ces secrets, il ne parle qu'à
+# ce backend, qui parle à Make.
+ADMIN_AUTH_SECRET = os.environ.get("ADMIN_AUTH_SECRET", "")
+ADMIN_USERS_JSON = os.environ.get("ADMIN_USERS", "[]")
+ADMIN_TOKEN_TTL_S = 20 * 60  # 20 min
+
+MAKE_INVENTAIRE_URLS = {
+    "list": os.environ.get("MAKE_INVENTAIRE_LIST_URL", ""),
+    "add": os.environ.get("MAKE_INVENTAIRE_ADD_URL", ""),
+    "update": os.environ.get("MAKE_INVENTAIRE_UPDATE_URL", ""),
+    "delete": os.environ.get("MAKE_INVENTAIRE_DELETE_URL", ""),
+}
 
 # Origines autorisées à appeler ce backend depuis le navigateur.
 ALLOWED_ORIGINS = [
@@ -641,3 +666,80 @@ async def job_status(job_id: str):
     if not row:
         return JSONResponse({"error_message": "job inconnu"}, status_code=404)
     return dict(row)
+
+
+# --------------------------------------------------------------------------
+# Onglet Admin — endpoints
+# --------------------------------------------------------------------------
+# Jeton signé (HMAC-SHA256), pas de session en base : "email:expiration:signature"
+# encodé en base64url. Auto-vérifiable, pas de secret transmis au front autre que
+# le jeton lui-même, qui expire tout seul après ADMIN_TOKEN_TTL_S.
+
+
+def _make_token(email: str) -> str:
+    exp = int(time.time()) + ADMIN_TOKEN_TTL_S
+    payload = f"{email}:{exp}"
+    sig = hmac.new(ADMIN_AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode(f"{payload}:{sig}".encode()).decode()
+
+
+def _verify_token(token: str) -> bool:
+    if not ADMIN_AUTH_SECRET or not token:
+        return False
+    try:
+        email, exp, sig = base64.urlsafe_b64decode(token.encode()).decode().rsplit(":", 2)
+        expected = hmac.new(ADMIN_AUTH_SECRET.encode(), f"{email}:{exp}".encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return False
+        return int(exp) >= int(time.time())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def require_admin(authorization: str = Header(default="")):
+    token = authorization.replace("Bearer ", "").strip()
+    if not _verify_token(token):
+        raise HTTPException(status_code=401, detail="Session admin invalide ou expirée — reconnecte-toi.")
+    return True
+
+
+class AdminLoginBody(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/admin/login")
+async def admin_login(body: AdminLoginBody):
+    if not ADMIN_AUTH_SECRET:
+        raise HTTPException(status_code=500, detail="ADMIN_AUTH_SECRET n'est pas configuré côté serveur (Render > Environment).")
+    try:
+        users = json.loads(ADMIN_USERS_JSON)
+    except Exception:  # noqa: BLE001
+        users = []
+    email = body.email.strip().lower()
+    match = next(
+        (u for u in users if str(u.get("email", "")).strip().lower() == email and u.get("password") == body.password),
+        None,
+    )
+    if not match:
+        raise HTTPException(status_code=401, detail="Identifiants incorrects.")
+    return {"token": _make_token(body.email)}
+
+
+@app.post("/admin/inventaire/{action}")
+async def admin_inventaire(action: str, payload: dict = Body(default={}), _ok: bool = Depends(require_admin)):
+    url = MAKE_INVENTAIRE_URLS.get(action)
+    if not url:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Action '{action}' inconnue ou variable d'environnement manquante côté serveur.",
+        )
+    try:
+        r = requests.post(url, json=payload, timeout=25)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Erreur de connexion à Make : {e}")
+    try:
+        data = r.json()
+    except ValueError:
+        data = {"raw": r.text}
+    return JSONResponse(data, status_code=r.status_code if r.status_code < 500 else 502)

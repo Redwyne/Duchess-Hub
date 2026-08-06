@@ -411,6 +411,11 @@
   function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
   function pollStatus(jobId, steps) {
+    // Toujours couper un éventuel sondage précédent avant d'en démarrer un nouveau — sinon,
+    // en cas de double soumission (ex: on relance avant que le job précédent soit fini), les
+    // deux minuteurs tournent en parallèle et se marchent dessus sur les mêmes éléments du DOM
+    // (ex: le label affiche "Terminé" d'un ancien job pendant que la barre reste à 0%).
+    stopPolling();
     pollDeadline = Date.now() + POLL_TIMEOUT_MS;
     pollTimer = setInterval(async () => {
       if (Date.now() > pollDeadline) {
@@ -453,6 +458,7 @@
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    stopPolling(); // coupe tout sondage résiduel d'une soumission précédente avant de repartir
     statusEl.className = "status";
     statusEl.textContent = "";
 

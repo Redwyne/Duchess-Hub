@@ -36,7 +36,7 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 6px 8px;
@@ -75,7 +75,7 @@
 }
 
 .cal-tab {
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 8px 16px;
@@ -116,7 +116,7 @@
 
 .cal-cell {
   min-height: 96px;
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-sm);
   padding: 8px;
