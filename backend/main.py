@@ -611,6 +611,14 @@ def correct_lyrics_with_claude(phrases, artiste: str = "", titre: str = ""):
             "tel quel. La différence à faire : une erreur d'ACCORD GRAMMATICAL (nombre, genre, "
             "conjugaison) presque toujours involontaire dans un texte écrit → tu corriges. Un "
             "choix de VOCABULAIRE ou de REGISTRE familier → tu laisses.\n\n"
+            "L'extrait fourni peut être très court — parfois une seule ligne isolée, sans "
+            "refrain ni contexte autour. C'est normal et volontaire (c'est un extrait, pas la "
+            "chanson entière) : ne demande JAMAIS plus de contexte, ne pose AUCUNE question, "
+            "ne renvoie AUCUN commentaire, préambule ou explication, même si une seule ligne "
+            "est fournie. Corrige cette ligne unique du mieux que tu peux avec ce que tu as "
+            "(bon sens grammatical), ou renvoie-la identique si tu n'es pas sûr — mais renvoie "
+            "TOUJOURS exactement une ligne corrigée par ligne reçue, jamais une question, "
+            "jamais un refus.\n\n"
             "Renvoie EXACTEMENT le même nombre de lignes, dans le même ordre, numérotées "
             "pareil, sans aucun commentaire ni explication avant/après — juste les lignes, "
             "corrigées ou identiques si rien à corriger.\n\n"
@@ -618,10 +626,31 @@ def correct_lyrics_with_claude(phrases, artiste: str = "", titre: str = ""):
         )
         resp = client.messages.create(
             model=CLAUDE_LYRICS_MODEL,
-            max_tokens=2000,
+            max_tokens=4000,
+            system=(
+                "Tu es un outil de transformation de texte automatisé, pas un assistant "
+                "conversationnel. Tu reçois toujours une liste de lignes numérotées et tu dois "
+                "TOUJOURS renvoyer exactement le même nombre de lignes numérotées, sans jamais "
+                "poser de question ni demander de contexte supplémentaire, même face à une "
+                "seule ligne isolée sans contexte. Aucune réponse de type question, refus ou "
+                "commentaire n'est acceptable : seules des lignes numérotées en sortie le sont."
+            ),
+            # claude-sonnet-5 réfléchit par défaut avant de répondre (bloc "thinking" séparé du
+            # bloc "text" dans resp.content, décompté du même budget max_tokens) — testé en
+            # direct : sur ce genre de tâche de correction ciblée, la réflexion étendue n'apporte
+            # rien (même qualité de correction avec/sans) mais coûte ~15x plus de tokens et peut
+            # carrément manger tout le budget avant d'écrire la réponse sur un petit extrait
+            # (vécu : max_tokens=2000, stop_reason="max_tokens", aucun bloc texte -> crash). On
+            # la désactive explicitement.
+            thinking={"type": "disabled"},
             messages=[{"role": "user", "content": prompt}],
         )
-        raw = resp.content[0].text if resp.content else ""
+        # Ne pas supposer que content[0] est le texte (robuste même si un bloc "thinking"
+        # apparaissait malgré tout) — on va chercher explicitement le(s) bloc(s) "text".
+        raw = "".join(getattr(b, "text", "") or "" for b in resp.content if getattr(b, "type", None) == "text")
+        if not raw.strip():
+            print(f"[Claude] pas de bloc texte dans la réponse (stop_reason={resp.stop_reason}) — correction ignorée.")
+            return None
         cleaned = [re.sub(r"^\d+[.)]\s*", "", l.strip()) for l in raw.strip().splitlines() if l.strip()]
         if len(cleaned) != len(phrases):
             print(f"[Claude] nombre de lignes différent ({len(cleaned)} vs {len(phrases)}) — correction ignorée.")
