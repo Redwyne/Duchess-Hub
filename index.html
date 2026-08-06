@@ -678,6 +678,38 @@
           </div>
         </div>
 
+        <div class="verify-block" id="srt-verifyBlock" style="display:none;">
+          <div class="field">
+            <label>Vérifier les paroles <span class="hl" style="font-weight:600;">corrige avant de générer</span></label>
+            <div class="hint" id="srt-verifyHint">Choisis d'abord un fichier.</div>
+          </div>
+
+          <div class="verify-player">
+            <button type="button" class="verify-playBtn" id="srt-verifyPlay" aria-label="Lecture">▶</button>
+            <div class="verify-wave" id="srt-verifyWave">
+              <canvas id="srt-waveCanvas"></canvas>
+              <div class="verify-playhead" id="srt-verifyPlayhead"></div>
+            </div>
+            <span class="verify-time" id="srt-verifyTime">0:00 / 0:00</span>
+          </div>
+
+          <div class="verify-bulk">
+            <input type="text" id="srt-bulkFrom" placeholder="Mot à corriger (ex: mansion)" />
+            <span class="verify-arrow">→</span>
+            <input type="text" id="srt-bulkTo" placeholder="Remplacer par (ex: maison)" />
+            <button type="button" class="verify-btn" id="srt-bulkApply">Remplacer partout</button>
+          </div>
+
+          <div class="verify-words" id="srt-verifyWords"></div>
+
+          <div class="verify-actions">
+            <button type="button" class="verify-btn" id="srt-verifyReset">Annuler mes corrections</button>
+            <span class="verify-status" id="srt-verifyStatus"></span>
+          </div>
+
+          <audio id="srt-verifyAudio" hidden></audio>
+        </div>
+
         <button class="go" id="srt-go" type="submit">Go</button>
         <div class="status" id="srt-status"></div>
       </form>
@@ -799,6 +831,16 @@
     <h2 id="admin-row-modal-title">Ajouter un élément</h2>
     <div class="admin-modal-sub" id="admin-row-modal-sub"></div>
     <form id="admin-row-form">
+      <div class="admin-photo-block">
+        <label>Photos de l'objet (optionnel)</label>
+        <div class="admin-photo-row">
+          <div class="admin-photo-thumbs" id="admin-photo-thumbs"></div>
+          <label class="admin-photo-add" for="admin-row-photos" id="admin-photo-add-label">+</label>
+          <input type="file" id="admin-row-photos" accept="image/*" multiple capture="environment" hidden>
+        </div>
+        <button type="button" class="admin-btn admin-btn-ghost admin-btn-sm" id="admin-analyze-photos" disabled>✨ Analyser avec l'IA</button>
+        <div class="admin-photo-hint">Photo de l'objet + de son étiquette/QR code si possible : l'IA préremplit ce qu'elle peut lire ci-dessous, à toi de vérifier avant d'enregistrer.</div>
+      </div>
       <div class="admin-grid2" id="admin-row-fields"></div>
       <div class="admin-error-msg" id="admin-row-error"></div>
       <div class="admin-modal-actions admin-modal-actions-split">

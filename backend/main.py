@@ -43,6 +43,8 @@ import unicodedata
 import uuid
 from pathlib import Path
 
+from typing import List
+
 import requests
 from fastapi import Body, Depends, FastAPI, Form, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
@@ -143,6 +145,12 @@ MAKE_INVENTAIRE_URLS = {
     "update": os.environ.get("MAKE_INVENTAIRE_UPDATE_URL", ""),
     "delete": os.environ.get("MAKE_INVENTAIRE_DELETE_URL", ""),
 }
+
+# Analyse photo IA (préremplissage du formulaire d'ajout d'inventaire) — clé
+# API Anthropic à définir sur Render (Dashboard > service backend > Environment).
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_VISION_MODEL = os.environ.get("ANTHROPIC_VISION_MODEL", "claude-sonnet-5")
+ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 
 # Origines autorisées à appeler ce backend depuis le navigateur.
 ALLOWED_ORIGINS = [
@@ -471,6 +479,29 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
     return words
 
 
+def _words_to_phrases(words, gap_threshold: float = 0.6):
+    """Reconstruit des "phrases" (comme la granularité "phrase") à partir d'une liste de MOTS —
+    utilisé quand l'utilisateur a corrigé les paroles dans l'éditeur de vérification (§ Vérifier
+    les paroles), qui travaille toujours au niveau mot, mais que le mode "Phrase entière" ou
+    l'export .srt attendent des lignes complètes. Heuristique simple : un silence de plus de
+    `gap_threshold` secondes entre deux mots marque une nouvelle ligne."""
+    if not words:
+        return []
+    phrases = []
+    cur = [words[0]]
+    for w in words[1:]:
+        if w["start"] - cur[-1]["end"] > gap_threshold:
+            phrases.append(cur)
+            cur = []
+        cur.append(w)
+    if cur:
+        phrases.append(cur)
+    return [
+        {"text": " ".join(w["text"] for w in p), "start": p[0]["start"], "end": p[-1]["end"]}
+        for p in phrases
+    ]
+
+
 # --------------------------------------------------------------------------
 # Génération .srt (Option 1)
 # --------------------------------------------------------------------------
@@ -764,6 +795,7 @@ def process_job(
     job_id, option, artiste, titre, upload_path: Path, font, font_weight, size_pct, color, mode,
     position="centre", effect="none", outline_color="#000000", outline_width="normal",
     fond="contour", text_case="majuscule", accent_color="#ffd400", italic=False, words_per_group=3,
+    edited_words="",
 ):
     try:
         if option == "preview":
@@ -775,7 +807,24 @@ def process_job(
         audio_path = DATA_DIR / f"{job_id}_audio.wav"
         run(["ffmpeg", "-y", "-i", str(upload_path), "-vn", "-ac", "1", "-ar", "16000", str(audio_path)])
 
-        words = get_or_transcribe(single_cle, granularity, audio_path, artiste=artiste, titre=titre)
+        # Si l'utilisateur a corrigé les paroles dans l'éditeur de vérification (mots + timing,
+        # toujours au niveau mot), on utilise SA version telle quelle au lieu de retranscrire —
+        # et on l'enregistre dans le cache pour que les prochains jobs sur ce single en profitent
+        # aussi. L'éditeur travaille au niveau mot : si la granularité demandée ici est "phrase"
+        # (mode "Phrase entière" ou export .srt), on reconstruit des lignes à partir des mots
+        # corrigés (silence > 0.6s = nouvelle ligne) plutôt que de perdre les corrections.
+        edited = None
+        if edited_words:
+            try:
+                edited = json.loads(edited_words)
+            except (TypeError, ValueError):
+                edited = None
+
+        if edited:
+            words = edited if granularity == "mot" else _words_to_phrases(edited)
+            _cache_timing(single_cle, granularity, words, "verifie_manuellement")
+        else:
+            words = get_or_transcribe(single_cle, granularity, audio_path, artiste=artiste, titre=titre)
         update_job(job_id, step_lyrics=1, current_label="Paroles timées")
 
         if not words:
@@ -921,6 +970,7 @@ async def create_job(
     accent_color: str = Form("#ffd400"),
     italic: str = Form("false"),
     words_per_group: str = Form("3"),
+    edited_words: str = Form(""),
     file: UploadFile = File(...),
 ):
     conn = db()
@@ -943,6 +993,7 @@ async def create_job(
             position=position, effect=effect, outline_color=outline_color,
             outline_width=outline_width, fond=fond, text_case=text_case, accent_color=accent_color,
             italic=str(italic).lower() in ("1", "true", "on", "yes"), words_per_group=words_per_group,
+            edited_words=edited_words,
         ),
         daemon=True,
     ).start()
@@ -1043,3 +1094,128 @@ async def admin_inventaire(action: str, payload: dict = Body(default={}), _ok: b
     except ValueError:
         data = {"raw": r.text}
     return JSONResponse(data, status_code=r.status_code if r.status_code < 500 else 502)
+
+
+def _resize_image_for_vision(raw: bytes, max_dim: int = 1568) -> bytes:
+    """Redimensionne/compresse une photo avant envoi à Claude : réduit le poids
+    de la requête (coût + vitesse, important sur mobile en 4G) sans perdre la
+    lisibilité d'une étiquette ou d'un QR code. Si Pillow n'est pas disponible
+    ou que le décodage échoue, renvoie l'image d'origine telle quelle plutôt
+    que de bloquer l'analyse."""
+    try:
+        from PIL import Image
+        import io as _io
+
+        img = Image.open(_io.BytesIO(raw))
+        img = img.convert("RGB")
+        w, h = img.size
+        scale = min(1.0, max_dim / max(w, h))
+        if scale < 1.0:
+            img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+        buf = _io.BytesIO()
+        img.save(buf, format="JPEG", quality=88)
+        return buf.getvalue()
+    except Exception as e:  # noqa: BLE001
+        print(f"[vision] redimensionnement échoué, envoi de l'original : {e}")
+        return raw
+
+
+@app.post("/admin/inventaire/analyze-photo")
+async def admin_inventaire_analyze_photo(
+    columns: str = Form(...),
+    photos: List[UploadFile] = File(...),
+    _ok: bool = Depends(require_admin),
+):
+    """Reçoit une ou plusieurs photos d'un objet d'inventaire + la liste des
+    colonnes du feuillet courant (envoyée par le front, qui seul connaît le
+    header exact de chaque feuillet — voir SHEET_META dans js/admin.js), et
+    demande à Claude de lire l'objet et tout QR code / code-barres / étiquette
+    visible pour préremplir le formulaire. L'utilisateur garde toujours la main
+    pour corriger avant d'enregistrer — rien n'est envoyé à l'Excel ici."""
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="ANTHROPIC_API_KEY n'est pas configurée côté serveur (Render > Environment).",
+        )
+    try:
+        cols = json.loads(columns)
+        if not isinstance(cols, list) or not cols:
+            raise ValueError
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Paramètre 'columns' invalide.")
+    if not photos:
+        raise HTTPException(status_code=400, detail="Aucune photo reçue.")
+    if len(photos) > 5:
+        raise HTTPException(status_code=400, detail="5 photos maximum par analyse.")
+
+    content_blocks = []
+    for photo in photos:
+        raw = await photo.read()
+        if not raw:
+            continue
+        resized = _resize_image_for_vision(raw)
+        content_blocks.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(resized).decode()},
+        })
+    if not content_blocks:
+        raise HTTPException(status_code=400, detail="Photos vides ou illisibles.")
+
+    columns_list = ", ".join(f'"{c}"' for c in cols)
+    prompt = (
+        "Tu analyses des photos d'un objet destiné à un inventaire de matériel professionnel "
+        "(audio, vidéo, informatique, ou entretien). Regarde attentivement l'objet ET toute "
+        "étiquette, marquage, plaque signalétique, QR code ou code-barres visible sur les photos "
+        "(zoome mentalement dessus, lis le texte même petit).\n\n"
+        f"Réponds UNIQUEMENT avec un objet JSON strict, sans aucun texte autour, avec exactement "
+        f"ces clés : [{columns_list}].\n"
+        "Règles :\n"
+        "- Remplis chaque champ avec ce que tu peux déduire ou lire sur les photos.\n"
+        "- Si un champ correspond à une catégorie/type d'objet, choisis une valeur courte et cohérente "
+        "avec les autres champs.\n"
+        "- Si un champ est un numéro de série, code article, ou identifiant lu sur une étiquette ou un "
+        "QR code, recopie-le exactement tel qu'il apparaît (respecte majuscules/minuscules et tirets).\n"
+        "- Si tu ne peux vraiment pas déterminer un champ, laisse une chaîne vide \"\" — n'invente jamais "
+        "une valeur que tu ne peux pas justifier par ce que tu vois.\n"
+        "- Les champs numériques (prix, nombre, quantité) : chiffres seuls, vide si inconnu.\n"
+        "- Pas de commentaire, pas de markdown, juste l'objet JSON."
+    )
+    content_blocks.append({"type": "text", "text": prompt})
+
+    try:
+        r = requests.post(
+            ANTHROPIC_API_URL,
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": ANTHROPIC_VISION_MODEL,
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": content_blocks}],
+            },
+            timeout=60,
+        )
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Erreur de connexion à Claude : {e}")
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Erreur Claude ({r.status_code}) : {r.text[:400]}")
+
+    data = r.json()
+    text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+        text = re.sub(r"```\s*$", "", text).strip()
+    try:
+        values = json.loads(text)
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Réponse IA illisible, réessaie ou remplis manuellement.")
+    if not isinstance(values, dict):
+        raise HTTPException(status_code=502, detail="Réponse IA mal formée, réessaie ou remplis manuellement.")
+
+    # Ne renvoie que les colonnes demandées — jamais de clé inattendue même
+    # si le modèle en a ajouté une de son propre chef.
+    clean = {c: str(values.get(c, "") or "") for c in cols}
+    return {"values": clean}

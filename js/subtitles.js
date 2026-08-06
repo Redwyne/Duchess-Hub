@@ -42,6 +42,20 @@
   const artisteInput = document.getElementById("srt-artiste");
   const titreInput = document.getElementById("srt-titre");
 
+  const verifyBlock = document.getElementById("srt-verifyBlock");
+  const verifyHint = document.getElementById("srt-verifyHint");
+  const verifyPlayBtn = document.getElementById("srt-verifyPlay");
+  const waveCanvas = document.getElementById("srt-waveCanvas");
+  const verifyPlayhead = document.getElementById("srt-verifyPlayhead");
+  const verifyTime = document.getElementById("srt-verifyTime");
+  const bulkFrom = document.getElementById("srt-bulkFrom");
+  const bulkTo = document.getElementById("srt-bulkTo");
+  const bulkApplyBtn = document.getElementById("srt-bulkApply");
+  const verifyWordsEl = document.getElementById("srt-verifyWords");
+  const verifyResetBtn = document.getElementById("srt-verifyReset");
+  const verifyStatus = document.getElementById("srt-verifyStatus");
+  const verifyAudio = document.getElementById("srt-verifyAudio");
+
   const form = document.getElementById("srt-genForm");
   const goBtn = document.getElementById("srt-go");
   const statusEl = document.getElementById("srt-status");
@@ -71,6 +85,16 @@
   let previewPollTimer = null;
   let previewDebounceTimer = null;
   let lastRealCueIdx = -1;
+
+  // Vérification/correction des paroles (nouvelle section, inspirée de l'éditeur "Word
+  // timeline" Flowstage) : les mots viennent du MÊME job "preview" que l'aperçu vidéo live —
+  // pas besoin d'un second aller-retour serveur. editedWords est la copie modifiable ; dès
+  // qu'elle change, elle est répercutée sur realWords/realCues (aperçu vidéo à jour) et envoyée
+  // au job final via le champ "edited_words" pour éviter de retranscrire.
+  let editedWords = null;
+  let originalRealWords = null;
+  let dragFromIndex = null;
+  let cachedAudioBuffer = null;
 
   const PRESETS = {
     "build-rond": {
@@ -115,7 +139,6 @@
         previewVideo.src = previewObjectUrl;
         previewVideo.classList.add("show");
         previewVideo.play().catch(() => {});
-        if (!realWords) schedulePreviewJob();
       }
     } else {
       fileInput.setAttribute("accept", "audio/*,video/*");
@@ -139,19 +162,28 @@
 
     resetRealPreview();
     if (previewObjectUrl) { URL.revokeObjectURL(previewObjectUrl); previewObjectUrl = null; }
+    cachedAudioBuffer = null;
+    previewObjectUrl = URL.createObjectURL(file); // sert à l'aperçu vidéo ET au lecteur audio de vérification
+    verifyAudio.src = previewObjectUrl;
 
     if (currentOption === "video" && file.type.startsWith("video/")) {
-      previewObjectUrl = URL.createObjectURL(file);
       previewVideo.src = previewObjectUrl;
       previewVideo.classList.add("show");
       previewVideo.play().catch(() => {});
       restartPreviewAnim(); // relance la démo texte le temps que le vrai timing arrive
-      schedulePreviewJob();
     } else {
       previewVideo.classList.remove("show");
       previewVideo.pause();
       previewVideo.removeAttribute("src");
     }
+
+    // La vérification des paroles (§ Vérifier les paroles) marche pour les deux options —
+    // elle ne dépend pas d'avoir choisi "Vidéo sous-titrée".
+    verifyBlock.style.display = "";
+    verifyHint.textContent = "Analyse des paroles en cours…";
+    verifyWordsEl.innerHTML = "";
+    drawWaveform();
+    schedulePreviewJob();
   }
   dropzone.addEventListener("click", () => fileInput.click());
   dropzone.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") fileInput.click(); });
@@ -459,8 +491,12 @@
     realCues = [];
     lastRealCueIdx = -1;
     previewJobId = null;
+    editedWords = null;
+    originalRealWords = null;
     if (previewPollTimer) { clearInterval(previewPollTimer); previewPollTimer = null; }
     previewCaption.textContent = "Aperçu texte (pas encore le rendu vidéo réel)";
+    verifyWordsEl.innerHTML = "";
+    verifyStatus.textContent = "";
   }
 
   function schedulePreviewJob() {
@@ -469,9 +505,10 @@
   }
 
   async function startPreviewJob() {
-    if (!selectedFile || currentOption !== "video") return;
+    if (!selectedFile) return;
     resetRealPreview();
     previewCaption.textContent = "Analyse des paroles en cours…";
+    verifyHint.textContent = "Analyse des paroles en cours…";
 
     const jobId = uuid();
     previewJobId = jobId;
@@ -499,6 +536,7 @@
         clearInterval(previewPollTimer);
         previewPollTimer = null;
         previewCaption.textContent = "Aperçu texte (analyse indisponible)";
+        verifyHint.textContent = "Analyse indisponible — réessaie plus tard.";
         return;
       }
       try {
@@ -509,6 +547,7 @@
           clearInterval(previewPollTimer);
           previewPollTimer = null;
           previewCaption.textContent = "Aperçu texte (analyse indisponible)";
+          verifyHint.textContent = "Analyse indisponible : " + data.error_message;
           return;
         }
         if (data.words_json) {
@@ -519,6 +558,7 @@
           previewCaption.textContent = "Aperçu vidéo — vrai timing des paroles";
           rebuildRealCues();
           lastRealCueIdx = -1;
+          activateVerify(realWords);
         }
       } catch (e) {
         // hoquet réseau — on retente au prochain tick
@@ -616,6 +656,232 @@
   window.addEventListener("resize", updatePreviewStyle);
   restartPreviewAnim();
   requestAnimationFrame(realSyncTick);
+
+  // ---------------------------------------------------------------------
+  // Vérification / correction des paroles — inspiré de l'éditeur "Word timeline" Flowstage
+  // (waveform + mots cliquables + drag-and-drop). Réutilise les mots du job "preview" ci-dessus
+  // (mêmes realWords) : pas de second aller-retour serveur. Toute correction ici est répercutée
+  // sur l'aperçu vidéo live (realWords/realCues) et envoyée telle quelle au job final
+  // (edited_words) pour que le backend n'ait pas besoin de retranscrire.
+  // ---------------------------------------------------------------------
+
+  function formatTime(t) {
+    t = Math.max(0, t || 0);
+    const m = Math.floor(t / 60);
+    const s = Math.floor(t % 60);
+    return m + ":" + String(s).padStart(2, "0");
+  }
+
+  function activateVerify(words) {
+    originalRealWords = words.map((w) => ({ text: w.text, start: w.start, end: w.end }));
+    editedWords = words.map((w) => ({ text: w.text, start: w.start, end: w.end }));
+    verifyHint.textContent = "";
+    verifyStatus.textContent = "";
+    renderVerifyWords();
+  }
+
+  function syncEditsToPreview() {
+    // Répercute les corrections sur l'aperçu vidéo live (§16) sans repasser par le serveur.
+    realWords = editedWords.map((w) => ({ ...w }));
+    lastRealCueIdx = -1;
+    restartPreviewAnim();
+  }
+
+  function renderVerifyWords() {
+    verifyWordsEl.innerHTML = "";
+    if (!editedWords) return;
+    editedWords.forEach((w, i) => {
+      const chip = document.createElement("span");
+      chip.className = "verify-word";
+      chip.textContent = w.text;
+      chip.dataset.index = String(i);
+      chip.draggable = true;
+      chip.title = formatTime(w.start) + " – " + formatTime(w.end) + " · double-clique pour corriger, glisse-dépose pour échanger avec un autre mot";
+      chip.addEventListener("dblclick", () => editWordChip(chip, i));
+      chip.addEventListener("dragstart", (e) => {
+        dragFromIndex = i;
+        chip.classList.add("dragging");
+        if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+      });
+      chip.addEventListener("dragend", () => chip.classList.remove("dragging"));
+      chip.addEventListener("dragover", (e) => { e.preventDefault(); chip.classList.add("drag-over"); });
+      chip.addEventListener("dragleave", () => chip.classList.remove("drag-over"));
+      chip.addEventListener("drop", (e) => {
+        e.preventDefault();
+        chip.classList.remove("drag-over");
+        if (dragFromIndex === null || dragFromIndex === i) { dragFromIndex = null; return; }
+        // Échange le TEXTE des deux mots — les horodatages restent ancrés à leur position sur
+        // la timeline, donc ça corrige un ordre mal transcrit sans jamais casser la synchro.
+        const tmp = editedWords[i].text;
+        editedWords[i].text = editedWords[dragFromIndex].text;
+        editedWords[dragFromIndex].text = tmp;
+        dragFromIndex = null;
+        renderVerifyWords();
+        verifyStatus.textContent = "Mots échangés ✓";
+        syncEditsToPreview();
+      });
+      verifyWordsEl.appendChild(chip);
+    });
+  }
+
+  function editWordChip(chip, i) {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "verify-word-edit";
+    input.value = editedWords[i].text;
+    chip.replaceWith(input);
+    input.focus();
+    input.select();
+    let committed = false;
+    const commit = () => {
+      if (committed) return;
+      committed = true;
+      const val = input.value.trim();
+      if (val) editedWords[i].text = val;
+      renderVerifyWords();
+      verifyStatus.textContent = "Correction enregistrée ✓";
+      syncEditsToPreview();
+    };
+    input.addEventListener("blur", commit);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); input.blur(); }
+      if (e.key === "Escape") { committed = true; renderVerifyWords(); }
+    });
+  }
+
+  function normalizeWordForMatch(s) {
+    return (s || "").toLowerCase().replace(/[.,!?;:"'’()]/g, "");
+  }
+
+  bulkApplyBtn.addEventListener("click", () => {
+    const from = bulkFrom.value.trim();
+    const to = bulkTo.value.trim();
+    if (!from || !to || !editedWords) return;
+    const fromNorm = normalizeWordForMatch(from);
+    let count = 0;
+    editedWords.forEach((w) => {
+      if (normalizeWordForMatch(w.text) === fromNorm) {
+        w.text = to;
+        count++;
+      }
+    });
+    if (count > 0) {
+      renderVerifyWords();
+      syncEditsToPreview();
+      verifyStatus.textContent = count + " occurrence(s) de « " + from + " » remplacée(s) par « " + to + " ».";
+    } else {
+      verifyStatus.textContent = "Aucune occurrence de « " + from + " » trouvée.";
+    }
+  });
+
+  verifyResetBtn.addEventListener("click", () => {
+    if (!originalRealWords) return;
+    editedWords = originalRealWords.map((w) => ({ ...w }));
+    renderVerifyWords();
+    syncEditsToPreview();
+    verifyStatus.textContent = "Corrections annulées.";
+  });
+
+  // --- Lecteur audio + waveform -------------------------------------------------------------
+
+  verifyPlayBtn.addEventListener("click", () => {
+    if (verifyAudio.paused) verifyAudio.play().catch(() => {});
+    else verifyAudio.pause();
+  });
+  verifyAudio.addEventListener("play", () => { verifyPlayBtn.textContent = "⏸"; });
+  verifyAudio.addEventListener("pause", () => { verifyPlayBtn.textContent = "▶"; });
+
+  waveCanvas.parentElement.addEventListener("click", (e) => {
+    if (!verifyAudio.duration) return;
+    const rect = waveCanvas.parentElement.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    verifyAudio.currentTime = frac * verifyAudio.duration;
+  });
+
+  function drawWordDensityFallback(ctx2d, w, h) {
+    if (!editedWords || !editedWords.length) return;
+    const totalDur = editedWords[editedWords.length - 1].end || 1;
+    ctx2d.fillStyle = "rgba(255,255,255,.25)";
+    editedWords.forEach((word) => {
+      const x = (word.start / totalDur) * w;
+      const bw = Math.max(2, ((word.end - word.start) / totalDur) * w);
+      ctx2d.fillRect(x, h * 0.25, bw, h * 0.5);
+    });
+  }
+
+  function paintWaveform(ctx2d, w, h, data) {
+    const step = Math.max(1, Math.floor(data.length / w));
+    ctx2d.fillStyle = "rgba(255,255,255,.35)";
+    for (let x = 0; x < w; x++) {
+      let min = 1, max = -1;
+      const start = x * step;
+      for (let i = 0; i < step; i++) {
+        const v = data[start + i] || 0;
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      const y1 = (1 + min) * 0.5 * h;
+      const y2 = (1 + max) * 0.5 * h;
+      ctx2d.fillRect(x, Math.min(y1, y2), 1, Math.max(2, Math.abs(y2 - y1)));
+    }
+  }
+
+  async function drawWaveform() {
+    if (!selectedFile) return;
+    const ctx2d = waveCanvas.getContext("2d");
+    const parent = waveCanvas.parentElement;
+    const w = (waveCanvas.width = parent.clientWidth || 600);
+    const h = (waveCanvas.height = parent.clientHeight || 56);
+    ctx2d.clearRect(0, 0, w, h);
+
+    if (!cachedAudioBuffer) {
+      try {
+        const buf = await selectedFile.arrayBuffer();
+        const AC = window.AudioContext || window.webkitAudioContext;
+        const actx = new AC();
+        cachedAudioBuffer = await actx.decodeAudioData(buf);
+        actx.close();
+      } catch (e) {
+        // Format non décodable par le navigateur (rare) — on retombe sur une visualisation
+        // basée sur la densité des mots, moins jolie mais toujours fiable.
+        cachedAudioBuffer = null;
+      }
+    }
+
+    if (cachedAudioBuffer) {
+      paintWaveform(ctx2d, w, h, cachedAudioBuffer.getChannelData(0));
+    } else {
+      drawWordDensityFallback(ctx2d, w, h);
+    }
+  }
+
+  window.addEventListener("resize", () => { if (selectedFile) drawWaveform(); });
+
+  let lastVerifyWordIdx = -1;
+  function verifyTick() {
+    if (verifyAudio.duration) {
+      const frac = verifyAudio.currentTime / verifyAudio.duration;
+      verifyPlayhead.style.left = frac * 100 + "%";
+      verifyTime.textContent = formatTime(verifyAudio.currentTime) + " / " + formatTime(verifyAudio.duration);
+    }
+    if (editedWords && editedWords.length) {
+      const t = verifyAudio.currentTime;
+      let idx = -1;
+      for (let i = editedWords.length - 1; i >= 0; i--) {
+        if (t >= editedWords[i].start) { idx = i; break; }
+      }
+      if (idx !== lastVerifyWordIdx) {
+        lastVerifyWordIdx = idx;
+        verifyWordsEl.querySelectorAll(".verify-word.playing").forEach((el) => el.classList.remove("playing"));
+        if (idx >= 0) {
+          const el = verifyWordsEl.querySelector('.verify-word[data-index="' + idx + '"]');
+          if (el) { el.classList.add("playing"); el.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+        }
+      }
+    }
+    requestAnimationFrame(verifyTick);
+  }
+  requestAnimationFrame(verifyTick);
 
   // ---------------------------------------------------------------------
   // Envoi + polling (même logique que les autres onglets du hub)
@@ -746,6 +1012,11 @@
     fd.append("artiste", document.getElementById("srt-artiste").value.trim());
     fd.append("titre", document.getElementById("srt-titre").value.trim());
     fd.append("file", selectedFile);
+    if (editedWords && editedWords.length) {
+      // Paroles corrigées dans la section "Vérifier les paroles" — le backend les utilise
+      // directement au lieu de retranscrire (voir edited_words côté /jobs).
+      fd.append("edited_words", JSON.stringify(editedWords));
+    }
     if (currentOption === "video") {
       fd.append("font", fontSel.value);
       fd.append("font_weight", selectedFontWeight());

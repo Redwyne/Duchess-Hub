@@ -335,7 +335,10 @@
 
   /* ---------------------------- Add / edit modal ---------------------------- */
   const rowOverlay = document.getElementById("admin-row-overlay");
-  document.getElementById("admin-cancel-row").addEventListener("click", () => rowOverlay.classList.add("hidden"));
+  document.getElementById("admin-cancel-row").addEventListener("click", () => {
+    rowOverlay.classList.add("hidden");
+    resetPhotos();
+  });
   document.getElementById("admin-add-row").addEventListener("click", () => openAddRow());
 
   function fieldInputType(colName) {
@@ -370,12 +373,112 @@
 
   const deleteRowBtn = document.getElementById("admin-delete-row");
 
+  /* ---------------------------- Photos + analyse IA ---------------------------- */
+  const MAX_PHOTOS = 5;
+  let selectedPhotos = [];
+  const photoInput = document.getElementById("admin-row-photos");
+  const photoThumbsWrap = document.getElementById("admin-photo-thumbs");
+  const photoAddLabel = document.getElementById("admin-photo-add-label");
+  const analyzeBtn = document.getElementById("admin-analyze-photos");
+
+  function resetPhotos() {
+    selectedPhotos.forEach((p) => { if (p.previewUrl) URL.revokeObjectURL(p.previewUrl); });
+    selectedPhotos = [];
+    photoInput.value = "";
+    renderPhotoThumbs();
+  }
+
+  function renderPhotoThumbs() {
+    photoThumbsWrap.innerHTML = "";
+    selectedPhotos.forEach((p, i) => {
+      const div = document.createElement("div");
+      div.className = "admin-photo-thumb";
+      div.innerHTML = `<img src="${p.previewUrl}" alt=""><button type="button" class="admin-photo-remove" data-remove="${i}">✕</button>`;
+      photoThumbsWrap.appendChild(div);
+    });
+    photoThumbsWrap.querySelectorAll("[data-remove]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const i = parseInt(btn.getAttribute("data-remove"));
+        const [removed] = selectedPhotos.splice(i, 1);
+        if (removed && removed.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+        renderPhotoThumbs();
+      });
+    });
+    photoAddLabel.style.display = selectedPhotos.length >= MAX_PHOTOS ? "none" : "flex";
+    analyzeBtn.disabled = selectedPhotos.length === 0;
+  }
+
+  photoInput.addEventListener("change", () => {
+    const files = Array.from(photoInput.files || []);
+    const room = MAX_PHOTOS - selectedPhotos.length;
+    files.slice(0, room).forEach((file) => {
+      selectedPhotos.push({ file, previewUrl: URL.createObjectURL(file) });
+    });
+    photoInput.value = "";
+    renderPhotoThumbs();
+  });
+
+  analyzeBtn.addEventListener("click", async () => {
+    if (selectedPhotos.length === 0) return;
+    const sheet = editingContext ? editingContext.sheet : currentSheet;
+    const { header } = STATE[sheet];
+    const errEl = document.getElementById("admin-row-error");
+    errEl.textContent = "";
+    analyzeBtn.classList.add("loading");
+    analyzeBtn.disabled = true;
+    try {
+      const fd = new FormData();
+      fd.append("columns", JSON.stringify(header));
+      selectedPhotos.forEach((p) => fd.append("photos", p.file, p.file.name || "photo.jpg"));
+      const res = await fetch(BACKEND_BASE_URL + "/admin/inventaire/analyze-photo", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + getToken() },
+        body: fd,
+      });
+      if (res.status === 401) {
+        clearAuthed();
+        rowOverlay.classList.add("hidden");
+        leaveToGate();
+        showLogin();
+        document.getElementById("admin-login-error").textContent = "Session expirée, reconnecte-toi.";
+        return;
+      }
+      const text = await res.text();
+      let json; try { json = JSON.parse(text); } catch (e) { json = null; }
+      if (!res.ok) throw new Error((json && json.detail) || text || "Analyse impossible.");
+
+      const values = (json && json.values) || {};
+      let filled = 0;
+      header.forEach((colName, i) => {
+        const v = values[colName];
+        if (v === undefined || v === null || v === "") return;
+        const field = document.querySelector(`#admin-row-fields [data-col="${i}"]`);
+        if (!field) return;
+        if (field.value) return; // ne jamais écraser une valeur déjà saisie/existante
+        if (field.tagName === "SELECT") {
+          const hasOption = Array.from(field.options).some((o) => o.value === v);
+          if (!hasOption) return;
+        }
+        field.value = v;
+        field.classList.add("admin-field-filled");
+        filled++;
+      });
+      toast(filled > 0 ? `Formulaire prérempli (${filled} champ${filled > 1 ? "s" : ""} détecté${filled > 1 ? "s" : ""}) ✨` : "L'IA n'a rien pu lire de fiable sur ces photos.", filled > 0 ? "ok" : "err");
+    } catch (err) {
+      errEl.textContent = err.message || "Analyse impossible.";
+    } finally {
+      analyzeBtn.classList.remove("loading");
+      analyzeBtn.disabled = selectedPhotos.length === 0;
+    }
+  });
+
   function openAddRow() {
     editingContext = null;
     document.getElementById("admin-row-modal-title").textContent = "Ajouter un élément — " + currentSheet;
     document.getElementById("admin-row-modal-sub").textContent = "Le code article n'est pas généré automatiquement : renseigne-le en suivant la nomenclature existante.";
     document.getElementById("admin-row-error").textContent = "";
     deleteRowBtn.classList.add("hidden");
+    resetPhotos();
     buildRowForm(currentSheet, null);
     rowOverlay.classList.remove("hidden");
   }
@@ -388,6 +491,7 @@
     document.getElementById("admin-row-modal-sub").textContent = "";
     document.getElementById("admin-row-error").textContent = "";
     deleteRowBtn.classList.remove("hidden");
+    resetPhotos();
     buildRowForm(name, row.values);
     rowOverlay.classList.remove("hidden");
   }
@@ -419,6 +523,7 @@
         toast("Élément ajouté ✅", "ok");
       }
       rowOverlay.classList.add("hidden");
+      resetPhotos();
       await loadSheet(sheet);
     } catch (err) {
       errEl.textContent = err.message || "Erreur lors de l'enregistrement.";

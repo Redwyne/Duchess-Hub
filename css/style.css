@@ -504,7 +504,9 @@ input, textarea, select {
   border-radius: var(--radius-sm);
   padding: 13px 15px;
   color: var(--text);
-  font-size: 14.5px;
+  /* 16px minimum : en dessous, Safari iOS zoome automatiquement la page au
+     focus d'un champ — détail invisible sur desktop, très gênant sur iPhone. */
+  font-size: 16px;
   font-family: inherit;
   transition: border-color .15s, box-shadow .15s;
 }
@@ -1279,6 +1281,131 @@ input[type="color"] {
 
 .preview-caption { font-size: 11px; color: var(--muted-2); text-align: center; }
 
+/* ---------------- Vérification des paroles (mots + timing, avant génération) ---------------- */
+
+.verify-block {
+  margin: 4px 0 24px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+
+.verify-player {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.verify-playBtn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--sunken);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color .15s, transform .12s;
+}
+.verify-playBtn:hover { border-color: var(--accent); transform: translateY(-1px); }
+
+.verify-wave {
+  position: relative;
+  flex: 1;
+  height: 56px;
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  cursor: pointer;
+}
+.verify-wave canvas { display: block; width: 100%; height: 100%; }
+.verify-playhead {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  pointer-events: none;
+}
+
+.verify-time { flex-shrink: 0; font-size: 12px; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+
+.verify-bulk {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.verify-bulk input { width: auto; flex: 1; min-width: 0; padding: 10px 13px; font-size: 16px; }
+.verify-arrow { color: var(--muted-2); flex-shrink: 0; }
+
+.verify-btn {
+  flex-shrink: 0;
+  padding: 9px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--sunken);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color .15s, transform .12s;
+  white-space: nowrap;
+}
+.verify-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+
+.verify-words {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px 2px;
+  margin-bottom: 12px;
+}
+
+.verify-word {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  cursor: grab;
+  user-select: none;
+  transition: background .12s, border-color .12s, transform .12s;
+}
+.verify-word:hover { border-color: var(--accent); }
+.verify-word.dragging { opacity: .4; }
+.verify-word.drag-over { border-color: var(--accent); transform: scale(1.05); }
+.verify-word.playing { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-2); }
+
+.verify-word-edit {
+  width: auto !important;
+  min-width: 60px;
+  padding: 5px 9px !important;
+  font-size: 16px !important;
+  border-radius: 8px !important;
+}
+
+.verify-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.verify-status { font-size: 12px; color: var(--ok); }
+
 /* Effets d'apparition — aperçu uniquement (le rendu réel utilise les tags ASS équivalents,
    voir _effect_tag() côté backend/main.py). */
 @keyframes previewFade { from { opacity: 0; } to { opacity: 1; } }
@@ -1287,3 +1414,54 @@ input[type="color"] {
 .anim-fade { animation: previewFade .25s ease both; }
 .anim-pop { animation: previewPop .28s cubic-bezier(.34,1.56,.64,1) both; }
 .anim-slide { animation: previewSlide .22s ease both; }
+
+/* ==========================================================================
+   Responsive mobile / iPhone
+   Breakpoints ciblés : 600px (bascule générale mobile) et 430px (les plus
+   petits iPhone en portrait — SE/mini vers 375px, Pro Max vers 430px).
+   ========================================================================== */
+
+@media (max-width: 600px) {
+  /* Topbar : logo au-dessus, nav + thème sur une ligne compacte en dessous,
+     onglets en bandeau défilant horizontalement plutôt que de s'empiler sur
+     plusieurs lignes (plus lisible et plus "app mobile" au pouce). */
+  .topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    padding: 18px 16px 0;
+  }
+  .nav-right { justify-content: space-between; gap: 8px; }
+  .tabnav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex: 1;
+    min-width: 0;
+  }
+  .tabnav::-webkit-scrollbar { display: none; }
+  .tab-btn { flex-shrink: 0; }
+
+  .layout { padding-left: 16px; padding-right: 16px; padding-top: 28px; }
+  .panel-card { padding: 22px 18px; border-radius: var(--radius-md); }
+  .feedback-card { padding: 20px 18px; }
+  .progress-box { padding: 20px 18px; }
+
+  .verify-bulk { flex-wrap: wrap; }
+  .verify-bulk input { flex-basis: 100%; }
+  .verify-arrow { display: none; }
+
+  .placeholder-card { margin: 32px auto; padding: 28px 20px; }
+
+  .calendar-section { padding-left: 16px; padding-right: 16px; }
+  .calendar-card { padding: 22px 16px; }
+}
+
+@media (max-width: 430px) {
+  .brand-text { font-size: 13.5px; }
+  .panel-head h1 { font-size: 22px; }
+  .go { padding: 14px; font-size: 15px; }
+  .counts-grid { gap: 6px; }
+  .vslider-wrap { height: 110px; }
+}
