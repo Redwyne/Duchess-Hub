@@ -83,7 +83,11 @@ FLOWSTAGE_BASE_URL = "https://api.theflowstage.com"
 # activée dès que la clé est présente — pas d'option par job (décision explicite de Michel :
 # "si je vois que ça crée trop de soucis je l'enlèverai"). Voir correct_lyrics_with_claude().
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-CLAUDE_LYRICS_MODEL = "claude-haiku-4-5-20251001"
+# Sonnet plutôt que Haiku : la tâche (repérer un accord singulier/pluriel fautif à partir du
+# sens et de la cohérence d'un refrain répété) demande un vrai raisonnement contextuel, pas
+# juste de la reconnaissance de motifs — et le volume de texte par appel (les paroles d'un
+# extrait) est trop faible pour que le coût Sonnet vs Haiku soit significatif.
+CLAUDE_LYRICS_MODEL = "claude-sonnet-5"
 
 # --------------------------------------------------------------------------
 # Stockage distant (Cloudflare R2) — les résultats générés (.srt / .mp4) sont
@@ -223,6 +227,13 @@ def init_db():
     # live côté front, sans passer par tout le pipeline SRT/ASS/rendu).
     try:
         conn.execute("ALTER TABLE jobs ADD COLUMN words_json TEXT")
+    except sqlite3.OperationalError:
+        pass  # colonne déjà présente
+    # lyrics_source : diagnostic — flowstage / audio_uploade / audio_uploade_corrige_claude /
+    # verifie_manuellement / cache (voir get_or_transcribe/process_job). Permet de savoir, pour
+    # un job donné, quel chemin a réellement produit les paroles affichées — sans avoir à deviner.
+    try:
+        conn.execute("ALTER TABLE jobs ADD COLUMN lyrics_source TEXT")
     except sqlite3.OperationalError:
         pass  # colonne déjà présente
     conn.execute(
@@ -501,15 +512,19 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
        "audio" Flowstage peut n'être qu'un clip partiel du morceau, pas le morceau entier.
     3. Repli : transcription faster-whisper de l'audio uploadé, puis passée à
        _apply_claude_correction() si ANTHROPIC_API_KEY est configurée (corrige les homophones
-       classiques du français sans jamais toucher au style/argot volontaire)."""
+       classiques du français sans jamais toucher au style/argot volontaire).
+
+    Renvoie un tuple (words, source) — `source` sert uniquement au diagnostic (exposé via
+    `lyrics_source` dans /jobs/{job_id}, voir process_job) pour savoir sans deviner par quel
+    chemin les paroles affichées sont réellement passées."""
     conn = db()
     row = conn.execute(
-        "SELECT timing_json FROM lyrics_timing WHERE single_cle = ? AND granularite = ?",
+        "SELECT timing_json, source_audio FROM lyrics_timing WHERE single_cle = ? AND granularite = ?",
         (single_cle, granularity),
     ).fetchone()
     conn.close()
     if row:
-        return json.loads(row["timing_json"])
+        return json.loads(row["timing_json"]), (row["source_audio"] or "cache")
 
     if FLOWSTAGE_API_KEY:
         aesthetic = find_flowstage_aesthetic(artiste, titre)
@@ -519,7 +534,7 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
             if words:
                 words = _merge_apostrophe_words(words)
                 _cache_timing(single_cle, granularity, words, "flowstage")
-                return words
+                return words, "flowstage"
 
     words = transcribe(audio_path, granularity)
     words = _merge_apostrophe_words(words)
@@ -529,7 +544,7 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
         words = corrected
         source = "audio_uploade_corrige_claude"
     _cache_timing(single_cle, granularity, words, source)
-    return words
+    return words, source
 
 
 def _words_to_phrases(words, gap_threshold: float = 0.4):
@@ -949,9 +964,10 @@ def process_job(
 
         if edited:
             words = edited if granularity == "mot" else _words_to_phrases(edited)
-            _cache_timing(single_cle, granularity, words, "verifie_manuellement")
+            lyrics_source = "verifie_manuellement"
+            _cache_timing(single_cle, granularity, words, lyrics_source)
         else:
-            words = get_or_transcribe(single_cle, granularity, audio_path, artiste=artiste, titre=titre)
+            words, lyrics_source = get_or_transcribe(single_cle, granularity, audio_path, artiste=artiste, titre=titre)
         update_job(job_id, step_lyrics=1, current_label="Paroles timées")
 
         if not words:
@@ -961,11 +977,14 @@ def process_job(
             # Transcription seule, pas de SRT/ASS/rendu — sert uniquement à alimenter
             # l'aperçu vidéo live côté front (vraie vidéo + vrai timing, pendant que
             # l'utilisateur choisit son style, avant de lancer le vrai rendu).
+            # lyrics_source (flowstage / audio_uploade / audio_uploade_corrige_claude / cache /
+            # verifie_manuellement) permet de savoir sans deviner quel chemin a été pris.
             update_job(
                 job_id,
                 status="done",
                 current_label="Terminé",
                 words_json=json.dumps(words),
+                lyrics_source=lyrics_source,
             )
             return
 
@@ -979,6 +998,7 @@ def process_job(
                 status="done",
                 current_label="Terminé",
                 download_url=remote_url or f"/files/{job_id}.srt",
+                lyrics_source=lyrics_source,
             )
             return
 
@@ -1059,6 +1079,7 @@ def process_job(
             status="done",
             current_label="Terminé",
             download_url=remote_url or f"/files/{job_id}.mp4",
+            lyrics_source=lyrics_source,
         )
     except subprocess.CalledProcessError as e:
         update_job(job_id, status="error", error_message=(e.stderr or b"").decode(errors="ignore")[:500])

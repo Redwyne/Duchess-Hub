@@ -1492,7 +1492,13 @@ input[type="color"] {
     gap: 12px;
     padding: 18px 16px 0;
   }
-  .nav-right { justify-content: space-between; gap: 8px; }
+  /* .nav-right doit être forcé en width:100% (pas juste align-items:stretch
+     du parent) : sans ça, un flex-item qui est lui-même display:flex garde
+     la taille min-content de son contenu (le .tabnav en nowrap) et pousse
+     toute la page plus large que l'écran — c'est ce qui causait le scroll
+     horizontal involontaire au clic sur l'onglet Admin (tout à droite du
+     bandeau) et le contenu qui semblait "s'arrêter" à mi-écran ensuite. */
+  .nav-right { justify-content: space-between; gap: 8px; width: 100%; min-width: 0; }
   .tabnav {
     flex-wrap: nowrap;
     overflow-x: auto;

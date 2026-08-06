@@ -566,7 +566,7 @@
           previewCaption.textContent = "Aperçu vidéo — vrai timing des paroles";
           rebuildRealCues();
           lastRealCueIdx = -1;
-          activateVerify(realWords);
+          activateVerify(realWords, data.lyrics_source);
         }
       } catch (e) {
         // hoquet réseau — on retente au prochain tick
@@ -680,10 +680,20 @@
     return m + ":" + String(s).padStart(2, "0");
   }
 
-  function activateVerify(words) {
+  // Libellés lisibles pour lyrics_source (voir get_or_transcribe/process_job côté backend) —
+  // permet de savoir d'un coup d'œil d'où viennent les paroles affichées, sans deviner.
+  const LYRICS_SOURCE_LABELS = {
+    flowstage: "📀 Paroles Flowstage (vérifiées manuellement)",
+    audio_uploade: "🎙️ Transcription automatique (whisper)",
+    audio_uploade_corrige_claude: "🎙️ Transcription automatique, corrigée par IA (Claude)",
+    verifie_manuellement: "✏️ Tes corrections manuelles",
+    cache: "💾 Déjà généré précédemment pour ce single",
+  };
+
+  function activateVerify(words, source) {
     originalRealWords = words.map((w) => ({ text: w.text, start: w.start, end: w.end }));
     editedWords = words.map((w) => ({ text: w.text, start: w.start, end: w.end }));
-    verifyHint.textContent = "";
+    verifyHint.textContent = LYRICS_SOURCE_LABELS[source] || "";
     verifyStatus.textContent = "";
     verifyLoadbar.style.display = "none";
     renderVerifyWords();
