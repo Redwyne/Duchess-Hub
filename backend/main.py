@@ -1069,33 +1069,6 @@ async def admin_login(body: AdminLoginBody):
     return {"token": _make_token(body.email)}
 
 
-@app.post("/admin/inventaire/{action}")
-async def admin_inventaire(action: str, payload: dict = Body(default={}), _ok: bool = Depends(require_admin)):
-    url = MAKE_INVENTAIRE_URLS.get(action)
-    if not url:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Action '{action}' inconnue ou variable d'environnement manquante côté serveur.",
-        )
-    forward_payload = dict(payload)
-    # Make corrompt silencieusement les tableaux imbriqués passés en JSON natif
-    # au module microsoft-excel:makeApiCall (le body Graph arrive vide côté
-    # Excel, sans erreur). On pré-sérialise donc nous-mêmes le corps exact
-    # attendu par Microsoft Graph et on le transmet comme simple texte, que
-    # Make n'a plus qu'à recopier tel quel — aucune coercion de type requise.
-    if action in ("add", "update") and "values" in payload:
-        forward_payload["graph_body"] = json.dumps({"values": payload["values"]})
-    try:
-        r = requests.post(url, json=forward_payload, timeout=25)
-    except requests.RequestException as e:
-        raise HTTPException(status_code=502, detail=f"Erreur de connexion à Make : {e}")
-    try:
-        data = r.json()
-    except ValueError:
-        data = {"raw": r.text}
-    return JSONResponse(data, status_code=r.status_code if r.status_code < 500 else 502)
-
-
 def _resize_image_for_vision(raw: bytes, max_dim: int = 1568) -> bytes:
     """Redimensionne/compresse une photo avant envoi à Claude : réduit le poids
     de la requête (coût + vitesse, important sur mobile en 4G) sans perdre la
@@ -1219,3 +1192,36 @@ async def admin_inventaire_analyze_photo(
     # si le modèle en a ajouté une de son propre chef.
     clean = {c: str(values.get(c, "") or "") for c in cols}
     return {"values": clean}
+
+
+# NOTE ordre des routes : "/admin/inventaire/{action}" est un chemin générique
+# qui matcherait aussi "/admin/inventaire/analyze-photo" si elle était déclarée
+# avant lui (FastAPI/Starlette matche dans l'ordre de déclaration) — d'où le
+# routing "analyze-photo" -> ce handler générique et l'erreur 500 observée.
+# Cette route générique doit donc rester déclarée APRÈS toutes les routes
+# littérales sous /admin/inventaire/.
+@app.post("/admin/inventaire/{action}")
+async def admin_inventaire(action: str, payload: dict = Body(default={}), _ok: bool = Depends(require_admin)):
+    url = MAKE_INVENTAIRE_URLS.get(action)
+    if not url:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Action '{action}' inconnue ou variable d'environnement manquante côté serveur.",
+        )
+    forward_payload = dict(payload)
+    # Make corrompt silencieusement les tableaux imbriqués passés en JSON natif
+    # au module microsoft-excel:makeApiCall (le body Graph arrive vide côté
+    # Excel, sans erreur). On pré-sérialise donc nous-mêmes le corps exact
+    # attendu par Microsoft Graph et on le transmet comme simple texte, que
+    # Make n'a plus qu'à recopier tel quel — aucune coercion de type requise.
+    if action in ("add", "update") and "values" in payload:
+        forward_payload["graph_body"] = json.dumps({"values": payload["values"]})
+    try:
+        r = requests.post(url, json=forward_payload, timeout=25)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Erreur de connexion à Make : {e}")
+    try:
+        data = r.json()
+    except ValueError:
+        data = {"raw": r.text}
+    return JSONResponse(data, status_code=r.status_code if r.status_code < 500 else 502)
