@@ -550,6 +550,17 @@ input, textarea, select {
   font-family: inherit;
   transition: border-color .15s, box-shadow .15s;
 }
+/* input[type=range] (curseurs de lecture Sound Connect) : la règle générique
+   ci-dessus (pensée pour les champs texte) leur ajoutait un padding/bordure
+   invisibles mais bien réels (13px/15px + 1px de bordure), gonflant leur boîte
+   réelle bien au-delà de la fine piste voulue (ex. volume passait de 5px à
+   28px de haut) — d'où un rond de curseur qui semblait mal aligné/à part de
+   sa piste près des extrémités. Chaque curseur gère son propre habillage. */
+input[type="range"] {
+  padding: 0;
+  border: none;
+  background: none;
+}
 input::placeholder, textarea::placeholder { color: var(--muted-2); }
 input:focus, textarea:focus, select:focus {
   outline: none;
