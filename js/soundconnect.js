@@ -1301,21 +1301,29 @@
       const audioBuffer = await ctx.decodeAudioData(buf);
       const data = audioBuffer.getChannelData(0);
       const bucketSize = Math.max(1, Math.floor(data.length / count));
-      const peaks = [];
+      // RMS (énergie moyenne) par tranche plutôt que le simple pic (max) : sur
+      // un titre mastérisé moderne, le pic de quasiment CHAQUE tranche frôle
+      // déjà le maximum (loudness normalisée) — un seul sample fort suffit à
+      // saturer toute une tranche à 100%. Résultat mesuré sur un vrai titre du
+      // catalogue : 82% des tranches au-dessus de 80% de hauteur en pic, contre
+      // 46% en RMS. Ça donnait une silhouette dense, quasi plate, qui "effaçait"
+      // la belle silhouette générée affichée le temps du chargement (voir
+      // generateFakePeaks) dès que l'analyse réelle arrivait ~1s plus tard — vu
+      // par Michel comme la silhouette qui "revient dans sa forme d'avant". Le
+      // RMS reflète le volume perçu sur la tranche et fait ressortir les vrais
+      // écarts calme/fort (intro, couplet/refrain...), bien plus dynamique.
+      const energies = [];
       for (let i = 0; i < count; i++) {
-        let max = 0;
         const start = i * bucketSize;
         const end = Math.min(data.length, start + bucketSize);
-        for (let j = start; j < end; j++) {
-          const v = Math.abs(data[j]);
-          if (v > max) max = v;
-        }
-        peaks.push(max);
+        let sumSq = 0;
+        for (let j = start; j < end; j++) { const v = data[j]; sumSq += v * v; }
+        energies.push(Math.sqrt(sumSq / Math.max(1, end - start)));
       }
-      // Normalise sur le pic réel de la piste pour occuper toute la hauteur
-      // disponible même si le morceau n'est jamais mixé à fond.
-      const globalMax = Math.max(0.02, ...peaks);
-      return peaks.map((v) => v / globalMax);
+      // Normalise sur la tranche la plus "forte" de la piste pour occuper
+      // toute la hauteur disponible même si le morceau n'est jamais mixé à fond.
+      const globalMax = Math.max(0.001, ...energies);
+      return energies.map((v) => v / globalMax);
     } finally {
       ctx.close();
     }
