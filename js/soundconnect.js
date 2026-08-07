@@ -281,6 +281,13 @@
   }
   function pushScHistory() {
     if (suppressScHistoryPush) return;
+    // Ne jamais empiler tant que l'onglet Sound Connect n'est pas VISIBLE à
+    // l'écran (ex. le chargement initial du sidebar/Home tourne en fond dès
+    // l'authentification, avant même que l'utilisateur ait cliqué l'onglet) —
+    // sinon cette entrée "fantôme" se fait aussitôt écraser par le prochain
+    // clic d'onglet (tabs.js fait un replaceState à data-tab non-soundconnect),
+    // laissant un trou (state null) qui cassait le tout premier retour arrière.
+    if (document.body.getAttribute("data-tab") !== "soundconnect") return;
     const cur = history.state;
     const newLast = breadcrumbStack[breadcrumbStack.length - 1];
     const curLast = cur && cur.scView ? cur.scView[cur.scView.length - 1] : null;
@@ -297,11 +304,16 @@
   window.addEventListener("popstate", (e) => {
     const state = e.state;
     if (!state || !state.scView) return; // pas une vue Sound Connect : on laisse faire (retour normal du navigateur)
+    // Suppression AVANT de cliquer l'onglet : ce clic déclenche aussi le
+    // listener plus bas qui appelle pushScHistory() (pour créer l'entrée du
+    // tout premier chargement de l'onglet) — sans cette suppression précoce,
+    // il empilerait l'ANCIENNE vue (celle d'avant le retour arrière) au lieu
+    // de laisser la restauration ci-dessous poser la bonne.
+    suppressScHistoryPush = true;
     if (document.body.getAttribute("data-tab") !== "soundconnect") {
       const btn = document.querySelector('.tab-btn[data-tab-target="soundconnect"]');
       if (btn) btn.click(); // active l'onglet — tabs.js fait au passage un replaceState(null, ...)
     }
-    suppressScHistoryPush = true;
     const stack = state.scView;
     const last = stack[stack.length - 1];
     if (last.type === "home") showHome();
@@ -1547,6 +1559,12 @@
   if (scTabBtn) {
     scTabBtn.addEventListener("click", () => {
       if (!scIsAuthed() && window.DuchessAuth) window.DuchessAuth.requestLogin("soundconnect");
+      // Crée (ou rafraîchit) l'entrée d'historique de la vue courante pile au
+      // moment où l'onglet devient réellement visible — tabs.js vient de
+      // faire un replaceState(null, ...) juste avant (même clic, listener
+      // enregistré plus tôt), donc pushScHistory() référence maintenant bien
+      // data-tab="soundconnect" et peut poser une entrée saine.
+      else pushScHistory();
     });
   }
   if (window.DuchessAuth) window.DuchessAuth.onChange(applyScLock);
