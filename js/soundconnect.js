@@ -73,7 +73,6 @@
   const scGate = document.getElementById("sc-gate");
   const scProtectedArea = document.getElementById("sc-protectedArea");
   const scReopenLoginBtn = document.getElementById("sc-reopen-login");
-  const warmAudioEl = document.getElementById("sc-audio-warm");
 
   // ---------------------------------------------------------------------
   // État
@@ -107,18 +106,12 @@
     return detail;
   }
 
-  // Préchauffe la connexion vers le lien audio temporaire (DNS/TLS + premiers
-  // octets) dès le survol d'une piste, avant même le clic — c'est ce qui
-  // réduit le délai perçu entre le clic et le vrai démarrage du son. On utilise
-  // un <audio> caché plutôt qu'un fetch() brut : le navigateur gère lui-même le
-  // bufferisation par petits blocs (comme pour la lecture réelle), sans se
-  // heurter aux restrictions CORS d'un fetch() manuel sur ces liens SharePoint.
-  let warmedUrl = "";
-  function warmTrackAudio(url) {
-    if (!url || !warmAudioEl || url === warmedUrl) return;
-    warmedUrl = url;
-    try { warmAudioEl.src = url; warmAudioEl.load(); } catch (e) {}
-  }
+  // NB : on a tenté de "préchauffer" le lien audio temporaire au survol via un
+  // second <audio> caché (même URL que la lecture réelle), mais les liens
+  // SharePoint temporaires n'aiment visiblement pas être requêtés deux fois —
+  // ça a cassé la lecture en prod (plus aucun son ne démarrait). Retiré.
+  // Seul le cache de métadonnées ci-dessus (getFolderDetailCached, qui ne
+  // touche jamais au fichier audio lui-même) est conservé.
 
   // ---------------------------------------------------------------------
   // Utilitaires
@@ -266,6 +259,22 @@
       if (i === breadcrumbStack.length - 1) return;
       el.addEventListener("click", () => gotoBreadcrumb(i));
     });
+    applyLabelTheme();
+  }
+
+  // Fond + palette d'accent qui suivent l'espace (librairie) actif : ARK et
+  // THEORY ont leur propre logo/couleur, DUCHESS (et Home/Search) gardent
+  // l'identité Duchess Hub par défaut. Basé sur le slug de l'espace courant
+  // (breadcrumbStack contient toujours l'entrée "workspace" une fois qu'on y
+  // est entré, y compris dans les dossiers/projets qu'il contient).
+  const KNOWN_LABELS = new Set(["ark", "theory"]);
+  function applyLabelTheme() {
+    const wsCrumb = breadcrumbStack.find((c) => c.type === "workspace");
+    const ws = wsCrumb ? allWorkspaces.find((w) => w.id === wsCrumb.id) : null;
+    const slug = ((ws && (ws.slug || ws.name)) || "").toLowerCase();
+    const label = KNOWN_LABELS.has(slug) ? slug : null;
+    if (label) document.body.setAttribute("data-sc-label", label);
+    else document.body.removeAttribute("data-sc-label");
   }
 
   function gotoBreadcrumb(i) {
@@ -695,12 +704,11 @@
         if (e.target.closest(".sc-tile-play") || e.target.closest(".sc-cover-edit-btn")) return;
         onTileClick(el.dataset.id, el.dataset.name);
       });
-      // Pré-charge le détail du dossier (et le premier titre) dès le survol —
-      // par le temps que le clic arrive, l'aller-retour réseau est déjà fait.
+      // Pré-charge le détail du dossier dès le survol — par le temps que le
+      // clic arrive, l'aller-retour réseau est déjà fait (métadonnées
+      // seulement, jamais le fichier audio lui-même).
       el.addEventListener("mouseenter", () => {
-        getFolderDetailCached(el.dataset.id)
-          .then((d) => { if (d.tracks && d.tracks[0]) warmTrackAudio(d.tracks[0].downloadUrl); })
-          .catch(() => {});
+        getFolderDetailCached(el.dataset.id).catch(() => {});
       });
     });
     contentEl.querySelectorAll(".sc-tile-play").forEach((btn) => {
@@ -866,11 +874,6 @@
         const idx = [...container.querySelectorAll(".sc-track-item")].indexOf(item);
         if (idx >= 0) playQueue(tracks, idx);
       });
-    });
-    // Même logique de préchauffe au survol que pour les tuiles : la connexion
-    // au lien audio est déjà chaude quand le clic arrive vraiment.
-    container.querySelectorAll(".sc-track-item").forEach((el, i) => {
-      el.addEventListener("mouseenter", () => warmTrackAudio(tracks[i] && tracks[i].downloadUrl));
     });
     if (removable) {
       container.querySelectorAll("[data-remove-idx]").forEach((btn) => {
@@ -1171,11 +1174,6 @@
     renderWaveform(t);
     player.classList.remove("hidden");
     updatePlayingHighlight();
-    // Préchauffe le titre suivant de la file pendant que celui-ci démarre —
-    // au moment où "Suivant" (ou la fin de piste) déclenche playRelative(1),
-    // la connexion est déjà chaude.
-    const next = tracks[index + 1];
-    if (next && next.downloadUrl) setTimeout(() => warmTrackAudio(next.downloadUrl), 1200);
   }
 
   function togglePlayPause() {

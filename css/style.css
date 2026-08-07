@@ -68,7 +68,8 @@ html[data-theme="light"] .blob-a { opacity: 0.25; }
 html[data-theme="light"] .blob-b { opacity: 0.16; }
 html[data-theme="light"] .blob-c { opacity: 0.12; }
 html[data-theme="light"] .brand-logo,
-html[data-theme="light"] .bg-logo {
+html[data-theme="light"] .bg-logo-default,
+html[data-theme="light"] .bg-logo-ark {
   filter: invert(1);
 }
 
@@ -185,12 +186,36 @@ body {
   right: -8%;
   width: 620px;
   max-width: 55vw;
-  opacity: 0.045;
+  opacity: 0;
   pointer-events: none;
   user-select: none;
+  transition: opacity .5s ease;
 }
 @media (max-width: 900px) {
   .bg-logo { display: none; }
+}
+
+/* Par défaut (hors Sound Connect, ou espace DUCHESS) : logo Duchess habituel */
+.bg-logo-default { opacity: 0.045; }
+body[data-tab="soundconnect"][data-sc-label="ark"] .bg-logo-default,
+body[data-tab="soundconnect"][data-sc-label="theory"] .bg-logo-default {
+  opacity: 0;
+}
+
+/* Sound Connect : le fond suit l'espace (librairie) sélectionné */
+body[data-tab="soundconnect"][data-sc-label="ark"] .bg-logo-ark { opacity: 0.05; }
+body[data-tab="soundconnect"][data-sc-label="theory"] .bg-logo-theory { opacity: 0.07; }
+
+/* Palette d'accent par label, dans l'onglet Sound Connect uniquement */
+body[data-tab="soundconnect"][data-sc-label="ark"] {
+  --accent: #dbf613;
+  --accent-2: #e9fa6c;
+  --accent-3: #afc606;
+}
+body[data-tab="soundconnect"][data-sc-label="theory"] {
+  --accent: #3801de;
+  --accent-2: #7c50fe;
+  --accent-3: #2800a1;
 }
 
 .grid-overlay {
