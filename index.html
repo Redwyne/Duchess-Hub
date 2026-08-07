@@ -773,6 +773,15 @@
 
 <!-- ============================= ONGLET SOUND CONNECT ============================= -->
 <div id="tab-soundconnect" class="tab-panel">
+
+<div class="admin-gate" id="sc-gate">
+  <div class="admin-gate-icon">🔒</div>
+  <h1>Sound Connect</h1>
+  <p>Section privée réservée à l'équipe Duchess. Connecte-toi pour accéder au catalogue.</p>
+  <button type="button" class="admin-btn admin-btn-primary" id="sc-reopen-login">Se connecter</button>
+</div>
+
+<div id="sc-protectedArea" class="hidden">
 <div class="sc-shell">
 
   <aside class="sc-sidebar">
@@ -811,6 +820,7 @@
 
 <div class="sc-player hidden" id="sc-player">
   <audio id="sc-audio" preload="none"></audio>
+  <audio id="sc-audio-warm" preload="auto" muted style="display:none"></audio>
   <div class="sc-player-left">
     <div class="sc-player-art" id="sc-playerArt">♪</div>
     <div class="sc-player-text">
@@ -886,6 +896,9 @@
     <div class="sc-modal-results" id="sc-pickerModalResults"></div>
   </div>
 </div>
+
+</div>
+<!-- /sc-protectedArea -->
 
 </div>
 
@@ -1170,8 +1183,8 @@
 <script src="js/tiktok.js"></script>
 <script src="js/tiktok-calendar.js"></script>
 <script src="js/subtitles.js"></script>
-<script src="js/soundconnect.js"></script>
 <script src="js/admin.js"></script>
+<script src="js/soundconnect.js"></script>
 <script src="js/budget.js"></script>
 </body>
 </html>

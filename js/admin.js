@@ -31,6 +31,15 @@
   let editingContext = null;
   let lastNonAdminTab = "pitch";
 
+  // Onglet qui a demandé la connexion quand ce n'est pas l'onglet Admin
+  // lui-même (ex. "soundconnect") — voir window.DuchessAuth.requestLogin()
+  // plus bas. Si null, un login réussi ouvre le dashboard Admin comme avant.
+  let pendingUnlockTarget = null;
+  const authListeners = [];
+  function notifyAuthListeners() {
+    authListeners.forEach((cb) => { try { cb(); } catch (e) {} });
+  }
+
   /* ---------------------------- DOM refs ---------------------------- */
   const overlay = document.getElementById("admin-login-overlay");
   const dashboard = document.getElementById("admin-dashboard");
@@ -51,10 +60,25 @@
   }
   function setAuthed(token) {
     sessionStorage.setItem(AUTH_KEY, token);
+    notifyAuthListeners();
   }
   function clearAuthed() {
     sessionStorage.removeItem(AUTH_KEY);
+    notifyAuthListeners();
   }
+
+  /* Session partagée : d'autres onglets (Sound Connect...) peuvent réutiliser
+     ce même jeton pour se verrouiller derrière le même écran de connexion,
+     sans dupliquer la logique de login. */
+  window.DuchessAuth = {
+    isAuthed,
+    getToken,
+    onChange(cb) { authListeners.push(cb); },
+    requestLogin(target) {
+      pendingUnlockTarget = target || null;
+      showLogin();
+    },
+  };
 
   function showLogin() {
     document.getElementById("admin-login-error").textContent = "";
@@ -101,11 +125,12 @@
 
   document.getElementById("admin-cancel-login").addEventListener("click", () => {
     hideLogin();
-    if (!isAuthed()) {
+    if (!isAuthed() && !pendingUnlockTarget) {
       const back = document.querySelector('.tab-btn[data-tab-target="' + lastNonAdminTab + '"]') ||
                    document.querySelector('.tab-btn[data-tab-target="pitch"]');
       if (back) back.click();
     }
+    pendingUnlockTarget = null;
   });
 
   document.getElementById("admin-login-form").addEventListener("submit", async function (e) {
@@ -128,7 +153,15 @@
       }
       const data = await res.json();
       setAuthed(data.token);
-      enterDashboard();
+      if (pendingUnlockTarget) {
+        // Connexion demandée par un autre onglet verrouillé (ex. Sound Connect) :
+        // on ne bascule pas sur le dashboard Admin, l'onglet d'origine se
+        // débloque lui-même via window.DuchessAuth.onChange().
+        pendingUnlockTarget = null;
+        hideLogin();
+      } else {
+        enterDashboard();
+      }
     } catch (err) {
       errEl.textContent = err.message || "Email ou mot de passe incorrect.";
     } finally {

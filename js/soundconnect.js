@@ -70,6 +70,11 @@
   const pickerModalSearch = document.getElementById("sc-pickerModalSearch");
   const pickerModalResults = document.getElementById("sc-pickerModalResults");
 
+  const scGate = document.getElementById("sc-gate");
+  const scProtectedArea = document.getElementById("sc-protectedArea");
+  const scReopenLoginBtn = document.getElementById("sc-reopen-login");
+  const warmAudioEl = document.getElementById("sc-audio-warm");
+
   // ---------------------------------------------------------------------
   // État
   // ---------------------------------------------------------------------
@@ -84,6 +89,36 @@
   const expandedTreeIds = new Set(); // ids d'espaces/dossiers dépliés dans l'arbre sidebar
   let pickerOnPick = null;
   let pickerItemsSource = [];
+  let scInitialized = false;
+
+  // Cache très court des détails de dossier (utilisé pour le pré-chargement au
+  // survol — voir plus bas) : évite de refaire l'aller-retour réseau si
+  // l'utilisateur a déjà survolé la tuile juste avant de cliquer. Invalidé à
+  // chaque mutation (renommage, déplacement, ajout/retrait de titre...) pour
+  // ne jamais afficher de données périmées.
+  const folderDetailCache = new Map();
+  const FOLDER_CACHE_TTL_MS = 20000;
+  function invalidateFolderCache() { folderDetailCache.clear(); }
+  async function getFolderDetailCached(id) {
+    const hit = folderDetailCache.get(id);
+    if (hit && Date.now() - hit.at < FOLDER_CACHE_TTL_MS) return hit.detail;
+    const detail = await fetchJSON(`/soundconnect/folders/${id}`);
+    folderDetailCache.set(id, { at: Date.now(), detail });
+    return detail;
+  }
+
+  // Préchauffe la connexion vers le lien audio temporaire (DNS/TLS + premiers
+  // octets) dès le survol d'une piste, avant même le clic — c'est ce qui
+  // réduit le délai perçu entre le clic et le vrai démarrage du son. On utilise
+  // un <audio> caché plutôt qu'un fetch() brut : le navigateur gère lui-même le
+  // bufferisation par petits blocs (comme pour la lecture réelle), sans se
+  // heurter aux restrictions CORS d'un fetch() manuel sur ces liens SharePoint.
+  let warmedUrl = "";
+  function warmTrackAudio(url) {
+    if (!url || !warmAudioEl || url === warmedUrl) return;
+    warmedUrl = url;
+    try { warmAudioEl.src = url; warmAudioEl.load(); } catch (e) {}
+  }
 
   // ---------------------------------------------------------------------
   // Utilitaires
@@ -422,6 +457,7 @@
       await fetchJSON(`/soundconnect/folders/${folderId}/tracks`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trackId }),
       });
+      invalidateFolderCache();
       flashToast(folderName ? `Ajouté à « ${folderName} ».` : "Ajouté.");
     } catch (e) { alert("Impossible d'ajouter : " + e.message); }
   }
@@ -528,6 +564,7 @@
   }
 
   function refreshCurrentView() {
+    invalidateFolderCache();
     const last = breadcrumbStack[breadcrumbStack.length - 1];
     if (!last || last.type === "home") showHome();
     else if (last.type === "search") showSearch();
@@ -658,12 +695,19 @@
         if (e.target.closest(".sc-tile-play") || e.target.closest(".sc-cover-edit-btn")) return;
         onTileClick(el.dataset.id, el.dataset.name);
       });
+      // Pré-charge le détail du dossier (et le premier titre) dès le survol —
+      // par le temps que le clic arrive, l'aller-retour réseau est déjà fait.
+      el.addEventListener("mouseenter", () => {
+        getFolderDetailCached(el.dataset.id)
+          .then((d) => { if (d.tracks && d.tracks[0]) warmTrackAudio(d.tracks[0].downloadUrl); })
+          .catch(() => {});
+      });
     });
     contentEl.querySelectorAll(".sc-tile-play").forEach((btn) => {
       btn.addEventListener("click", async (e) => {
         e.stopPropagation();
         try {
-          const detail = await fetchJSON(`/soundconnect/folders/${btn.dataset.playId}`);
+          const detail = await getFolderDetailCached(btn.dataset.playId);
           if (detail.tracks.length) playQueue(detail.tracks, 0);
         } catch (err) {}
       });
@@ -751,7 +795,7 @@
     renderBreadcrumb();
     let detail;
     try {
-      detail = await fetchJSON(`/soundconnect/folders/${id}`);
+      detail = await getFolderDetailCached(id);
     } catch (e) {
       contentEl.innerHTML = emptyStateHtml("Dossier introuvable.");
       return;
@@ -823,6 +867,11 @@
         if (idx >= 0) playQueue(tracks, idx);
       });
     });
+    // Même logique de préchauffe au survol que pour les tuiles : la connexion
+    // au lien audio est déjà chaude quand le clic arrive vraiment.
+    container.querySelectorAll(".sc-track-item").forEach((el, i) => {
+      el.addEventListener("mouseenter", () => warmTrackAudio(tracks[i] && tracks[i].downloadUrl));
+    });
     if (removable) {
       container.querySelectorAll("[data-remove-idx]").forEach((btn) => {
         btn.addEventListener("click", async (e) => {
@@ -830,6 +879,7 @@
           const t = tracks[+btn.dataset.removeIdx];
           try {
             await fetchJSON(`/soundconnect/folders/${folderId}/tracks/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+            invalidateFolderCache();
             const detail = await fetchJSON(`/soundconnect/folders/${folderId}`);
             renderProjectDetail(detail);
           } catch (err) {}
@@ -915,6 +965,7 @@
     const name = newModalName.value.trim();
     if (!name) return;
     try {
+      invalidateFolderCache();
       if (newModalMode === "workspace") {
         await fetchJSON("/soundconnect/workspaces", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
         closeNewModal();
@@ -949,6 +1000,7 @@
     if (!confirm("Supprimer ce dossier et tout son contenu (les titres restent dans le catalogue, seul le classement disparaît) ?")) return;
     try {
       await fetchJSON(`/soundconnect/folders/${id}`, { method: "DELETE" });
+      invalidateFolderCache();
       const parent = parentBreadcrumb[parentBreadcrumb.length - 1];
       if (parent.type === "workspace") showWorkspace(parent.id, parent.name);
       else if (parent.type === "folder") showFolder(parent.id, parent.name, parentBreadcrumb.slice(0, -1));
@@ -994,6 +1046,7 @@
             await fetchJSON(`/soundconnect/folders/${currentFolderIdForAdd}/tracks`, {
               method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trackId: el.dataset.trackId }),
             });
+            invalidateFolderCache();
             el.querySelector(".sc-modal-result-add").textContent = "Ajouté ✓";
           } catch (err) {}
         });
@@ -1118,6 +1171,11 @@
     renderWaveform(t);
     player.classList.remove("hidden");
     updatePlayingHighlight();
+    // Préchauffe le titre suivant de la file pendant que celui-ci démarre —
+    // au moment où "Suivant" (ou la fin de piste) déclenche playRelative(1),
+    // la connexion est déjà chaude.
+    const next = tracks[index + 1];
+    if (next && next.downloadUrl) setTimeout(() => warmTrackAudio(next.downloadUrl), 1200);
   }
 
   function togglePlayPause() {
@@ -1218,12 +1276,53 @@
   // Démarrage
   // ---------------------------------------------------------------------
 
-  (async function init() {
+  async function initSoundConnect() {
     try {
       const cat = await fetchJSON("/soundconnect/catalog");
       syncStatusEl.textContent = cat.syncedAt ? formatSyncedAt(cat.syncedAt) + ` · ${cat.tracks.length} titres` : "Pas encore synchronisé";
     } catch (e) {}
     await loadSidebar();
     showHome();
-  })();
+  }
+
+  // ---------------------------------------------------------------------
+  // Verrou d'accès — même session que l'onglet Admin (voir window.DuchessAuth
+  // exposé par js/admin.js). C'est un verrou d'affichage : les endpoints
+  // /soundconnect/* restent des routes publiques côté backend comme avant,
+  // exactement comme le bouton "🔒 Admin" n'est lui-même qu'une porte d'entrée
+  // — la vraie protection des données Admin, elle, vient du jeton vérifié par
+  // le backend à chaque appel /admin/*.
+  // ---------------------------------------------------------------------
+  function scIsAuthed() {
+    return !!(window.DuchessAuth && window.DuchessAuth.isAuthed());
+  }
+  function applyScLock() {
+    if (!scGate || !scProtectedArea) return;
+    if (scIsAuthed()) {
+      scGate.style.display = "none";
+      scProtectedArea.classList.remove("hidden");
+      if (!scInitialized) {
+        scInitialized = true;
+        initSoundConnect();
+      }
+    } else {
+      scGate.style.display = "";
+      scProtectedArea.classList.add("hidden");
+    }
+  }
+  if (scReopenLoginBtn) {
+    scReopenLoginBtn.addEventListener("click", () => {
+      if (window.DuchessAuth) window.DuchessAuth.requestLogin("soundconnect");
+    });
+  }
+  // Même comportement que l'onglet Admin : cliquer sur l'onglet quand on n'est
+  // pas connecté ouvre directement le login, sans étape intermédiaire.
+  const scTabBtn = document.querySelector('.tab-btn[data-tab-target="soundconnect"]');
+  if (scTabBtn) {
+    scTabBtn.addEventListener("click", () => {
+      if (!scIsAuthed() && window.DuchessAuth) window.DuchessAuth.requestLogin("soundconnect");
+    });
+  }
+  if (window.DuchessAuth) window.DuchessAuth.onChange(applyScLock);
+  applyScLock();
 })();
