@@ -502,12 +502,6 @@
           </div>
         </div>
         <div class="field">
-          <label for="srt-flowstageAesthetic">Aesthetic Flowstage <span class="hl" style="font-weight:600;">optionnel — si tu connais le nom exact</span></label>
-          <input id="srt-flowstageAesthetic" placeholder="ex: 0006 Toi & Moi" />
-        </div>
-        <div class="hint">💡 Si ce single a déjà été traité ailleurs sur le hub, ou si tu donnes le nom exact de l'aesthetic Flowstage ci-dessus, les paroles vérifiées et leur timing sont réutilisés automatiquement — pas besoin de retranscrire.</div>
-
-        <div class="field">
           <label id="srt-dzLabel">Fichier audio</label>
           <div class="dropzone" id="srt-dropzone" tabindex="0">
             <input type="file" id="srt-fileInput" accept="audio/*,video/*" hidden />
@@ -516,6 +510,22 @@
             <div class="dz-file" id="srt-dzFile"></div>
           </div>
         </div>
+        <div class="hint">💡 Si ce single a déjà été traité ailleurs sur le hub, les paroles vérifiées et leur timing sont réutilisés automatiquement — pas besoin de retranscrire.</div>
+
+        <details class="advanced-options">
+          <summary>Options avancées <span class="hl" style="font-weight:600;">si le résultat automatique ne suffit pas</span></summary>
+          <div class="advanced-options-body">
+            <div class="field">
+              <label for="srt-flowstageAesthetic">Aesthetic Flowstage <span class="hl" style="font-weight:600;">optionnel — si tu connais le nom exact</span></label>
+              <input id="srt-flowstageAesthetic" placeholder="ex: 0006 Toi & Moi" />
+              <div class="hint">Force le matching si le single existe déjà sur Flowstage mais n'a pas été retrouvé automatiquement.</div>
+            </div>
+            <div class="field">
+              <label for="srt-referenceLyrics">Paroles de référence <span class="hl" style="font-weight:600;">optionnel — bien plus précis si tu les as</span></label>
+              <textarea id="srt-referenceLyrics" rows="3" placeholder="Colle ici les vraies paroles (une ligne par ligne) si tu les as — la correction alignera le texte transcrit dessus au lieu de deviner."></textarea>
+            </div>
+          </div>
+        </details>
 
         <div class="verify-block" id="srt-verifyBlock" style="display:none;">
           <div class="field">
@@ -533,11 +543,6 @@
               <div class="verify-playhead" id="srt-verifyPlayhead"></div>
             </div>
             <span class="verify-time" id="srt-verifyTime">0:00 / 0:00</span>
-          </div>
-
-          <div class="verify-reference">
-            <label for="srt-referenceLyrics">Paroles de référence <span class="hl" style="font-weight:600;">optionnel — bien plus précis si tu les as</span></label>
-            <textarea id="srt-referenceLyrics" rows="3" placeholder="Colle ici les vraies paroles (une ligne par ligne) si tu les as — la correction alignera le texte transcrit dessus au lieu de deviner."></textarea>
           </div>
 
           <div class="verify-bulk">
@@ -774,7 +779,6 @@
     <div class="sc-header-text">
       <div class="guide-kicker">Base audio Duchess</div>
       <h1>Sound Connect</h1>
-      <p>Catalogue en direct des masters PHONO. Pour chaque titre : une seule version — le mix le plus récent en 44kHz, jamais l'instru, jamais le 48kHz.</p>
     </div>
     <div class="sc-header-actions">
       <div class="sc-sync-status" id="sc-syncStatus">Pas encore synchronisé</div>
