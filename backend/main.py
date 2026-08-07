@@ -51,7 +51,7 @@ from typing import List, Optional
 import requests
 from fastapi import Body, Depends, FastAPI, Form, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -201,6 +201,10 @@ BUDGET_LOGO_PATH = APP_DIR.parent / "assets" / "logo-white-bg.png"
 # Un seul scénario Make générique "liste le contenu d'un dossier SharePoint donné",
 # appelé récursivement par ce backend (pas de logique de parcours côté Make).
 MAKE_SOUNDCONNECT_LIST_FOLDER_URL = os.environ.get("MAKE_SOUNDCONNECT_LIST_FOLDER_URL", "")
+# Scénario Make "DUCHESS SOUND CONNECT - UPLOAD VERSION" : webhook multipart (file +
+# folderId + filename) -> onedrive:uploadAFile dans PHONO (conflictBehavior=rename,
+# donc n'écrase jamais un fichier existant). Seul endpoint qui écrit dans PHONO.
+MAKE_SOUNDCONNECT_UPLOAD_VERSION_URL = os.environ.get("MAKE_SOUNDCONNECT_UPLOAD_VERSION_URL", "")
 PHONO_ROOT_FOLDER_ID = "01B23DVXZSZKHPS7B5PBAJOCZHT5W3RGC5"
 
 # Analyse photo IA (préremplissage du formulaire d'ajout d'inventaire) — clé
@@ -2002,6 +2006,10 @@ def _sc_build_catalog() -> dict:
                 "webUrl": best.get("webUrl"),
                 "lastModified": best.get("lastModifiedDateTime"),
                 "versionConfidence": best.get("versionConfidence", "strict"),
+                # Dossier PHONO du titre (pas le fichier) — nécessaire pour retrouver un lien
+                # de téléchargement frais (les liens Graph expirent) et pour uploader une
+                # "nouvelle version" au bon endroit (seul cas où on écrit dans PHONO).
+                "parentFolderId": title["id"],
             })
     return {"tracks": catalog, "unresolvedFolders": unresolved_folders}
 
@@ -2187,6 +2195,7 @@ def _org_upsert_track(data: dict, raw: dict) -> str:
         "webUrl": raw.get("webUrl"),
         "lastModified": raw.get("lastModified"),
         "versionConfidence": raw.get("versionConfidence"),
+        "parentFolderId": raw.get("parentFolderId"),
         "syncedAt": _now_iso(),
     }
     return tid
@@ -2198,12 +2207,35 @@ def _org_link_track(data: dict, folder_id: str, track_id: str):
         lst.append(track_id)
 
 
+def _org_descendant_ids(data: dict, folder_id: str) -> set:
+    """IDs du dossier lui-même + tous ses descendants (projets/playlists/sous-dossiers)."""
+    to_collect = {folder_id}
+    grew = True
+    while grew:
+        grew = False
+        for child in data["folders"].values():
+            if child.get("parentId") in to_collect and child["id"] not in to_collect:
+                to_collect.add(child["id"])
+                grew = True
+    return to_collect
+
+
+def _org_move_folder_workspace(data: dict, folder_id: str, new_workspace_id: str):
+    """Change l'espace d'un dossier ET cascade sur tous ses descendants — utilisé pour
+    le drag and drop d'un artiste vers un autre espace (Library) et pour la
+    réconciliation automatique du roster ARK/DUCHESS. Les titres liés (folderTracks)
+    ne référencent que des IDs de dossier, jamais d'espace : rien à faire de leur côté."""
+    for fid in _org_descendant_ids(data, folder_id):
+        if fid in data["folders"]:
+            data["folders"][fid]["workspaceId"] = new_workspace_id
+
+
 def _org_reconcile_workspaces(data: dict) -> bool:
     """Auto-corrige les dossiers artiste déjà créés dont l'espace (ARK/DUCHESS) ne
     correspond plus au roster ARK_ARTISTS courant (ex. roster corrigé après coup).
     Déplace le dossier artiste ET tous ses descendants (projets/playlists) vers le
-    bon espace, sans toucher aux titres liés (folderTracks référence des IDs de
-    dossier, pas d'espace). Appelé à chaque sync pour rester auto-réparant."""
+    bon espace, sans toucher aux titres liés. Appelé à chaque sync pour rester
+    auto-réparant."""
     ws_by_name = {ws["name"]: wid for wid, ws in data["workspaces"].items()}
     changed_any = False
     for f in list(data["folders"].values()):
@@ -2216,16 +2248,7 @@ def _org_reconcile_workspaces(data: dict) -> bool:
             ws_by_name[correct_ws_name] = correct_ws_id
         if f["workspaceId"] == correct_ws_id:
             continue
-        to_move = {f["id"]}
-        grew = True
-        while grew:
-            grew = False
-            for child in data["folders"].values():
-                if child.get("parentId") in to_move and child["id"] not in to_move:
-                    to_move.add(child["id"])
-                    grew = True
-        for fid in to_move:
-            data["folders"][fid]["workspaceId"] = correct_ws_id
+        _org_move_folder_workspace(data, f["id"], correct_ws_id)
         changed_any = True
     return changed_any
 
@@ -2340,6 +2363,7 @@ def soundconnect_folder_detail(folder_id: str):
 class SCFolderUpdateBody(BaseModel):
     name: Optional[str] = None
     parentId: Optional[str] = None
+    workspaceId: Optional[str] = None
 
 
 @app.put("/soundconnect/folders/{folder_id}")
@@ -2350,6 +2374,12 @@ def soundconnect_update_folder(folder_id: str, body: SCFolderUpdateBody):
         raise HTTPException(status_code=404, detail="Dossier introuvable.")
     if body.name is not None and body.name.strip():
         f["name"] = body.name.strip()
+    if body.workspaceId is not None and body.workspaceId != f["workspaceId"]:
+        # Déplacement vers un autre espace (drag and drop artiste -> Library, ou
+        # projet -> artiste d'un autre espace) : cascade sur tous les descendants.
+        if body.workspaceId not in data["workspaces"]:
+            raise HTTPException(status_code=404, detail="Espace introuvable.")
+        _org_move_folder_workspace(data, folder_id, body.workspaceId)
     if body.parentId is not None:
         f["parentId"] = body.parentId or None
     _org_save(data)
@@ -2402,6 +2432,29 @@ def soundconnect_remove_track_from_folder(folder_id: str, track_id: str):
     return {"removed": True}
 
 
+@app.get("/soundconnect/folders")
+def soundconnect_list_all_folders(kind: Optional[str] = None):
+    """Liste à plat TOUS les dossiers/projets/playlists, tous espaces confondus, avec le
+    nom de leur espace et de leur parent — sert à construire l'arbre de la sidebar
+    (drag and drop) et les pickers "Déplacer" / "Ajouter au projet X" du menu clic droit,
+    en un seul appel plutôt qu'un aller-retour par niveau."""
+    data = _org_load()
+    kinds = set(kind.split(",")) if kind else None
+    out = []
+    for f in data["folders"].values():
+        if kinds and f["kind"] not in kinds:
+            continue
+        ws = data["workspaces"].get(f["workspaceId"])
+        parent = data["folders"].get(f.get("parentId")) if f.get("parentId") else None
+        out.append({
+            "id": f["id"], "name": f["name"], "kind": f["kind"], "parentId": f.get("parentId"),
+            "workspaceId": f["workspaceId"], "workspaceName": ws["name"] if ws else "",
+            "parentName": parent["name"] if parent else None,
+        })
+    out.sort(key=lambda x: (x["workspaceName"].lower(), (x["parentName"] or "").lower(), x["name"].lower()))
+    return {"folders": out}
+
+
 @app.get("/soundconnect/tracks")
 def soundconnect_search_tracks(q: str = ""):
     data = _org_load()
@@ -2411,6 +2464,137 @@ def soundconnect_search_tracks(q: str = ""):
         tracks = [t for t in tracks if ql in t["artist"].lower() or ql in t["title"].lower()]
     tracks.sort(key=lambda t: (t["artist"].lower(), t["title"].lower()))
     return {"tracks": tracks}
+
+
+def _sc_find_in_folder(folder_id: str, *, external_id: Optional[str] = None, filename: Optional[str] = None) -> Optional[dict]:
+    """Reliste un dossier PHONO (toujours à jour côté Make/Graph, contrairement au cache)
+    et retrouve un fichier précis par id puis, à défaut, par nom exact (insensible à la
+    casse). Utilisé pour rafraîchir un lien de téléchargement expiré et pour relire les
+    métadonnées d'un fichier qui vient d'être uploadé (nouvelle version)."""
+    items = [it for it in _sc_list_folder(folder_id) if not it.get("isFolder")]
+    if external_id:
+        match = next((it for it in items if it.get("id") == external_id), None)
+        if match:
+            return match
+    if filename:
+        fl = filename.lower()
+        match = next((it for it in items if (it.get("name") or "").lower() == fl), None)
+        if match:
+            return match
+    return None
+
+
+@app.get("/soundconnect/tracks/{track_id}/download")
+def soundconnect_track_download(track_id: str):
+    """Les liens SharePoint (`@microsoft.graph.downloadUrl`) sont temporaires — le lien
+    mis en cache lors du dernier sync PHONO a très probablement expiré. On relit le
+    dossier d'origine pour en obtenir un frais avant de rediriger dessus."""
+    data = _org_load()
+    track = data["tracks"].get(track_id)
+    if not track:
+        raise HTTPException(status_code=404, detail="Titre introuvable.")
+    fresh_url = None
+    if track.get("parentFolderId"):
+        try:
+            match = _sc_find_in_folder(track["parentFolderId"], external_id=track.get("externalId"), filename=track.get("filename"))
+            if match:
+                fresh_url = match.get("downloadUrl")
+        except HTTPException:
+            pass  # Make/PHONO indisponible -> on retombe sur le lien en cache ci-dessous
+    fresh_url = fresh_url or track.get("downloadUrl")
+    if not fresh_url:
+        raise HTTPException(status_code=404, detail="Aucun lien de téléchargement disponible — resynchronise le catalogue.")
+    return RedirectResponse(fresh_url)
+
+
+def _sc_next_version_filename(current_filename: str, files_in_folder: list, uploaded_filename: str) -> str:
+    """Détermine le nom de fichier à utiliser pour une nouvelle version PHONO.
+
+    Règle de Michel : on repère le numéro de mix le plus élevé actuellement présent
+    (souvent après un '#', ex. '#06') et on construit le même nom de fichier avec ce
+    numéro incrémenté ('#07'), en conservant tout le reste du nom (44khz, 24Bit, etc.)
+    à l'identique. Si le fichier déposé par l'équipe porte déjà exactement ce nom
+    attendu, on le garde tel quel plutôt que de le renommer nous-mêmes.
+    """
+    audio_files = [f for f in files_in_folder if (f.get("name") or "").lower().endswith(_SC_AUDIO_EXT)]
+    max_version, pad = 0, 2
+    for f in audio_files:
+        m = _SC_VERSION_NUM_RE.search(f.get("name") or "")
+        if m and int(m.group(1)) > max_version:
+            max_version, pad = int(m.group(1)), len(m.group(1))
+    next_str = str(max_version + 1).zfill(pad)
+
+    m_cur = _SC_VERSION_NUM_RE.search(current_filename or "")
+    if m_cur:
+        expected = current_filename[:m_cur.start()] + f"#{next_str}" + current_filename[m_cur.end():]
+    else:
+        # Le fichier de référence ne suit pas la convention "#NN" (cas déjà connu, ex.
+        # "TW - Dernière Danse-24bits-M.wav") : on ne peut pas incrémenter proprement,
+        # on ajoute le numéro de version en filet de sécurité plutôt que d'échouer.
+        base, ext = os.path.splitext(current_filename or uploaded_filename or "nouvelle-version.wav")
+        expected = f"{base} #{next_str}{ext}"
+
+    def _norm(s):
+        return re.sub(r"\s+", " ", (s or "").strip()).lower()
+
+    if uploaded_filename and _norm(uploaded_filename) == _norm(expected):
+        return uploaded_filename  # déjà nommé correctement par l'équipe, on ne renomme pas
+    return expected
+
+
+@app.post("/soundconnect/tracks/{track_id}/new-version")
+async def soundconnect_new_version(track_id: str, file: UploadFile = File(...)):
+    """Seul endpoint qui écrit dans PHONO (SharePoint), sur demande explicite de
+    l'équipe (clic droit -> Nouvelle version). N'écrase jamais un fichier existant
+    (conflictBehavior=rename côté Make) : le nouveau mix s'ajoute toujours à côté des
+    précédents, jamais à leur place."""
+    if not MAKE_SOUNDCONNECT_UPLOAD_VERSION_URL:
+        raise HTTPException(status_code=500, detail="MAKE_SOUNDCONNECT_UPLOAD_VERSION_URL n'est pas configurée côté serveur (Render > Environment).")
+    data = _org_load()
+    track = data["tracks"].get(track_id)
+    if not track:
+        raise HTTPException(status_code=404, detail="Titre introuvable.")
+    parent_folder_id = track.get("parentFolderId")
+    if not parent_folder_id:
+        raise HTTPException(status_code=400, detail="Dossier PHONO d'origine inconnu pour ce titre — resynchronise le catalogue puis réessaie.")
+
+    raw_bytes = await file.read()
+    if not raw_bytes:
+        raise HTTPException(status_code=400, detail="Fichier vide.")
+    if len(raw_bytes) > 200 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Fichier trop volumineux (200 Mo max).")
+
+    siblings = [it for it in _sc_list_folder(parent_folder_id) if not it.get("isFolder")]
+    new_filename = _sc_next_version_filename(track.get("filename") or "", siblings, file.filename or "")
+
+    try:
+        r = requests.post(
+            MAKE_SOUNDCONNECT_UPLOAD_VERSION_URL,
+            files={"file": (new_filename, raw_bytes, file.content_type or "application/octet-stream")},
+            data={"folderId": parent_folder_id, "filename": new_filename},
+            timeout=180,
+        )
+        r.raise_for_status()
+        result = r.json()
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Erreur lors de l'upload vers SharePoint (Make) : {e}")
+    if not result.get("ok"):
+        raise HTTPException(status_code=502, detail="L'upload SharePoint a échoué côté Make.")
+
+    # Relit le dossier pour récupérer un downloadUrl frais et cohérent avec le reste du
+    # catalogue (la réponse d'upload elle-même n'expose pas forcément ce champ).
+    fresh = _sc_find_in_folder(parent_folder_id, external_id=result.get("id"), filename=result.get("name"))
+
+    track["filename"] = result.get("name", new_filename)
+    track["size"] = (fresh or {}).get("size", result.get("size"))
+    track["webUrl"] = (fresh or {}).get("webUrl", result.get("webUrl"))
+    track["downloadUrl"] = (fresh or {}).get("downloadUrl")
+    track["lastModified"] = (fresh or {}).get("lastModifiedDateTime", result.get("lastModifiedDateTime"))
+    track["externalId"] = result.get("id", track.get("externalId"))
+    track["versionConfidence"] = "strict"
+    track["syncedAt"] = _now_iso()
+    _org_save(data)
+    return {"ok": True, "track": track}
 
 
 # --------------------------------------------------------------------------

@@ -1071,7 +1071,7 @@
   let waveformToken = 0;
   function renderWaveform(track) {
     const myToken = ++waveformToken;
-    const BAR_PITCH = 5; // largeur + espace visés par barre — barres calées exactement sur la largeur réelle du conteneur, jamais de vide résiduel sur le côté.
+    const BAR_PITCH = 3; // largeur + espace visés par barre — barres calées exactement sur la largeur réelle du conteneur, jamais de vide résiduel sur le côté.
     const count = Math.max(30, Math.floor((waveformEl.clientWidth || 480) / BAR_PITCH));
     const fake = generateFakePeaks(String(track.id || track.title || "x"), count);
     waveformBgEl.innerHTML = barsMarkup(fake);
