@@ -575,7 +575,7 @@ input[type="range"].sc-volume::-moz-range-progress { background: var(--accent); 
 .sc-modal-head h3 { font-family: var(--font-head); font-size: 16px; font-weight: 600; }
 .sc-modal-close { background: none; border: none; color: var(--muted-2); cursor: pointer; font-size: 14px; width: 26px; height: 26px; border-radius: 50%; }
 .sc-modal-close:hover { background: var(--sunken); color: var(--text); }
-.sc-modal input[type="text"], .sc-modal input[type="search"] {
+.sc-modal input[type="text"], .sc-modal input[type="search"], .sc-modal input[type="password"] {
   width: 100%; background: var(--sunken); border: 1px solid var(--border); border-radius: var(--radius-sm);
   padding: 10px 12px; color: var(--text); font-size: 13.5px; font-family: var(--font-body); outline: none; margin-bottom: 14px;
 }
@@ -589,6 +589,64 @@ input[type="range"].sc-volume::-moz-range-progress { background: var(--accent); 
 .sc-modal-result-title { font-size: 13px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sc-modal-result-artist { font-size: 11.5px; color: var(--muted-2); }
 .sc-modal-result-add { font-size: 11px; font-weight: 700; color: var(--accent-2); text-transform: uppercase; letter-spacing: .04em; flex-shrink: 0; }
+
+/* ---------------- Partage externe ---------------- */
+
+.sc-modal-share { max-width: 460px; max-height: 82vh; }
+.sc-share-target {
+  font-size: 13px; font-weight: 600; color: var(--text); background: var(--sunken);
+  border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 16px; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.sc-share-section-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--muted-2); margin-bottom: 8px;
+}
+.sc-share-links { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; max-height: 220px; overflow-y: auto; }
+.sc-share-link-row {
+  display: grid; grid-template-columns: 1fr auto auto auto auto; align-items: center; gap: 8px;
+  padding: 8px 10px; border-radius: var(--radius-sm); background: var(--sunken); border: 1px solid transparent;
+}
+.sc-share-link-row.sc-share-link-disabled { opacity: .5; }
+.sc-share-link-info { min-width: 0; }
+.sc-share-link-name { font-size: 12.5px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-share-link-url { font-size: 11px; color: var(--muted-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-share-link-icon-btn {
+  background: none; border: none; color: var(--muted-2); cursor: pointer; width: 26px; height: 26px;
+  display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); flex-shrink: 0;
+}
+.sc-share-link-icon-btn svg { width: 14px; height: 14px; }
+.sc-share-link-icon-btn:hover { background: var(--panel-2); color: var(--text); }
+.sc-share-link-delete:hover { color: #e5556a; }
+.sc-share-newlink-btn { width: 100%; margin-bottom: 4px; }
+.sc-share-newlink-form { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.sc-share-form-title { font-size: 12.5px; font-weight: 700; color: var(--muted-2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 10px; }
+.sc-share-toggle-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+.sc-share-toggle-row:last-of-type { border-bottom: none; }
+.sc-share-toggle-title { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.sc-share-toggle-sub { font-size: 11px; color: var(--muted-2); margin-top: 1px; }
+.sc-share-form-actions { display: flex; gap: 8px; margin-top: 14px; }
+.sc-share-form-actions .sc-btn { flex: 1; }
+
+/* Interrupteur on/off réutilisable (permissions de partage, activer/désactiver un lien) */
+.sc-toggle { position: relative; display: inline-block; width: 38px; height: 22px; flex-shrink: 0; cursor: pointer; }
+.sc-toggle input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.sc-toggle span {
+  position: absolute; inset: 0; background: var(--border); border-radius: 99px; transition: background .15s;
+  pointer-events: none; /* laisse le clic traverser jusqu'à l'input réel en dessous */
+}
+.sc-toggle span::before {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; transition: transform .15s; box-shadow: 0 1px 3px rgba(0,0,0,.3);
+}
+.sc-toggle input:checked + span { background: var(--accent); }
+.sc-toggle input:checked + span::before { transform: translateX(16px); }
+.sc-toggle-sm { width: 30px; height: 18px; }
+.sc-toggle-sm span::before { width: 14px; height: 14px; }
+.sc-toggle-sm input:checked + span::before { transform: translateX(12px); }
 
 /* Menu clic droit (titres, dossiers/projets/playlists) */
 .sc-ctx-menu {

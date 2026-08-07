@@ -913,6 +913,62 @@
   </div>
 </div>
 
+<!-- Modale : partage externe (lien public vers un titre ou un projet) -->
+<div class="sc-modal-overlay hidden" id="sc-shareModal">
+  <div class="sc-modal sc-modal-share">
+    <div class="sc-modal-head">
+      <h3>Partager</h3>
+      <button type="button" class="sc-modal-close" id="sc-shareModalClose">✕</button>
+    </div>
+    <div class="sc-share-target" id="sc-shareModalTarget"></div>
+
+    <div class="sc-share-section-label">Liens existants</div>
+    <div class="sc-share-links" id="sc-shareModalLinks"></div>
+
+    <button type="button" class="sc-btn sc-share-newlink-btn" id="sc-shareModalNewLinkBtn">+ Créer un lien</button>
+
+    <div class="sc-share-newlink-form hidden" id="sc-shareModalForm">
+      <div class="sc-share-form-title" id="sc-shareModalFormTitle">Nouveau lien</div>
+      <input type="text" id="sc-shareModalName" placeholder="Nom du lien (optionnel)" />
+
+      <div class="sc-share-toggle-row">
+        <div class="sc-share-toggle-text">
+          <div class="sc-share-toggle-title">Écoute en streaming</div>
+          <div class="sc-share-toggle-sub">Le visiteur peut écouter directement sur la page.</div>
+        </div>
+        <label class="sc-toggle"><input type="checkbox" id="sc-shareModalStreaming" checked /><span></span></label>
+      </div>
+      <div class="sc-share-toggle-row">
+        <div class="sc-share-toggle-text">
+          <div class="sc-share-toggle-title">Téléchargement HQ</div>
+          <div class="sc-share-toggle-sub">Autorise le téléchargement du fichier original.</div>
+        </div>
+        <label class="sc-toggle"><input type="checkbox" id="sc-shareModalDownload" /><span></span></label>
+      </div>
+      <div class="sc-share-toggle-row">
+        <div class="sc-share-toggle-text">
+          <div class="sc-share-toggle-title">Infos du titre</div>
+          <div class="sc-share-toggle-sub">Affiche l'artiste et le titre sur la page publique.</div>
+        </div>
+        <label class="sc-toggle"><input type="checkbox" id="sc-shareModalTrackInfo" checked /><span></span></label>
+      </div>
+      <div class="sc-share-toggle-row">
+        <div class="sc-share-toggle-text">
+          <div class="sc-share-toggle-title">Protection par mot de passe</div>
+          <div class="sc-share-toggle-sub">Un mot de passe sera demandé avant l'accès.</div>
+        </div>
+        <label class="sc-toggle"><input type="checkbox" id="sc-shareModalPwToggle" /><span></span></label>
+      </div>
+      <input type="password" id="sc-shareModalPassword" class="hidden" placeholder="Mot de passe…" autocomplete="new-password" />
+
+      <div class="sc-share-form-actions">
+        <button type="button" class="sc-btn" id="sc-shareModalCancelEditBtn">Annuler</button>
+        <button type="button" class="sc-btn sc-btn-primary" id="sc-shareModalCreateBtn">Créer le lien</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </div>
 <!-- /sc-protectedArea -->
 

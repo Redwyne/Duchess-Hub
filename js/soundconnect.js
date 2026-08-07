@@ -73,6 +73,22 @@
   const pickerModalSearch = document.getElementById("sc-pickerModalSearch");
   const pickerModalResults = document.getElementById("sc-pickerModalResults");
 
+  const shareModal = document.getElementById("sc-shareModal");
+  const shareModalClose = document.getElementById("sc-shareModalClose");
+  const shareModalTarget = document.getElementById("sc-shareModalTarget");
+  const shareModalLinks = document.getElementById("sc-shareModalLinks");
+  const shareModalNewLinkBtn = document.getElementById("sc-shareModalNewLinkBtn");
+  const shareModalForm = document.getElementById("sc-shareModalForm");
+  const shareModalName = document.getElementById("sc-shareModalName");
+  const shareModalStreaming = document.getElementById("sc-shareModalStreaming");
+  const shareModalDownload = document.getElementById("sc-shareModalDownload");
+  const shareModalTrackInfo = document.getElementById("sc-shareModalTrackInfo");
+  const shareModalPwToggle = document.getElementById("sc-shareModalPwToggle");
+  const shareModalPassword = document.getElementById("sc-shareModalPassword");
+  const shareModalCreateBtn = document.getElementById("sc-shareModalCreateBtn");
+  const shareModalFormTitle = document.getElementById("sc-shareModalFormTitle");
+  const shareModalCancelEditBtn = document.getElementById("sc-shareModalCancelEditBtn");
+
   const scGate = document.getElementById("sc-gate");
   const scProtectedArea = document.getElementById("sc-protectedArea");
   const scReopenLoginBtn = document.getElementById("sc-reopen-login");
@@ -865,6 +881,7 @@
         showContextMenu(e.clientX, e.clientY, [
           { label: "Déplacer vers…", onClick: () => openPickerForMoveProjectToFolder(el.dataset.id, el.dataset.name) },
           { label: "Renommer…", onClick: () => quickRenameFolder(el.dataset.id, el.dataset.name) },
+          { label: "Partager…", onClick: () => openShareModal("project", el.dataset.id, el.dataset.name) },
           { sep: true },
           { label: "Supprimer", danger: true, onClick: () => quickDeleteFolder(el.dataset.id) },
         ]);
@@ -959,10 +976,12 @@
       setTopbarActions(`
         <button type="button" class="sc-btn" id="sc-renameTop">Renommer</button>
         <button type="button" class="sc-btn" id="sc-newPlaylistTop">+ Nouveau projet</button>
+        <button type="button" class="sc-btn" id="sc-shareTop">Partager</button>
         <button type="button" class="sc-btn" id="sc-deleteFolderTop" title="Supprimer">🗑 Supprimer</button>
       `);
       document.getElementById("sc-renameTop").addEventListener("click", () => renameFolder(id, name, parentBreadcrumb));
       document.getElementById("sc-newPlaylistTop").addEventListener("click", () => openProjectTypeModal({ workspaceId, parentId: id }));
+      document.getElementById("sc-shareTop").addEventListener("click", () => openShareModal("project", id, name));
       document.getElementById("sc-deleteFolderTop").addEventListener("click", () => deleteFolder(id, parentBreadcrumb));
       renderProjectMixed(detail, breadcrumbStack);
     }
@@ -1039,6 +1058,9 @@
   const TRACK_ICON_SHARE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>`;
   const TRACK_ICON_INFO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
   const TRACK_ICON_MORE = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg>`;
+  const SHARE_ICON_COPY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>`;
+  const SHARE_ICON_EDIT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>`;
+  const SHARE_ICON_TRASH = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"></path></svg>`;
 
   // Liste d'actions partagée entre le clic droit ET le bouton "..." de chaque
   // ligne — une seule source de vérité pour ne jamais désynchroniser les deux.
@@ -1047,6 +1069,7 @@
     if (removable && folderId) items.push({ label: "Déplacer vers…", onClick: () => openPickerForMoveTrack(t, folderId) });
     items.push({ sep: true });
     items.push({ label: "Télécharger (WAV)", onClick: () => downloadTrack(t) });
+    items.push({ label: "Partager…", onClick: () => openShareModal("track", t.id, `${t.title} — ${t.artist}`) });
     items.push({ label: "Nouvelle version…", onClick: () => triggerNewVersionUpload(t) });
     if (removable && folderId) {
       items.push({ sep: true });
@@ -1129,7 +1152,14 @@
     container.querySelectorAll(".sc-track-action-download").forEach((btn) => {
       btn.addEventListener("click", (e) => { e.stopPropagation(); downloadTrack(tracks[+btn.dataset.idx]); });
     });
-    container.querySelectorAll(".sc-track-action-share, .sc-track-action-info").forEach((btn) => {
+    container.querySelectorAll(".sc-track-action-share").forEach((btn, i) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const t = tracks[i];
+        openShareModal("track", t.id, `${t.title} — ${t.artist}`);
+      });
+    });
+    container.querySelectorAll(".sc-track-action-info").forEach((btn) => {
       btn.addEventListener("click", (e) => { e.stopPropagation(); }); // pas encore implémenté
     });
     container.querySelectorAll(".sc-track-action-more").forEach((btn) => {
@@ -1735,6 +1765,211 @@
     } catch (e) {}
     await loadSidebar();
     showHome();
+  }
+
+  // ---------------------------------------------------------------------
+  // Partage externe — lien public vers un titre ou un projet.
+  //
+  // Les routes /soundconnect/shares/* sont, elles, protégées côté backend
+  // (Depends(require_admin) — contrairement au reste de l'API Sound Connect)
+  // : on doit donc systématiquement attacher le jeton admin, contrairement à
+  // fetchJSON() utilisé partout ailleurs dans ce fichier. Piège déjà rencontré
+  // et corrigé une fois sur js/budget.js : construire l'objet headers fusionné
+  // À PART, puis le spread EN DERNIER dans les options du fetch, jamais
+  // Object.assign({headers:...}, options) qui écraserait silencieusement notre
+  // Authorization dès que l'appelant passe son propre Content-Type.
+  // ---------------------------------------------------------------------
+
+  function shareAuthHeaders(extra) {
+    const token = window.DuchessAuth && window.DuchessAuth.getToken ? window.DuchessAuth.getToken() : null;
+    return Object.assign({}, extra || {}, token ? { Authorization: `Bearer ${token}` } : {});
+  }
+  function fetchShareJSON(path, options) {
+    const opts = options || {};
+    const headers = shareAuthHeaders(opts.headers);
+    return fetchJSON(path, Object.assign({}, opts, { headers }));
+  }
+
+  let shareModalCtx = null; // { targetType, targetId, displayName }
+  let shareModalEditingId = null; // id du lien en cours d'édition, sinon null (= création)
+
+  function shareModalResetForm() {
+    shareModalEditingId = null;
+    shareModalName.value = "";
+    shareModalStreaming.checked = true;
+    shareModalDownload.checked = false;
+    shareModalTrackInfo.checked = true;
+    shareModalPwToggle.checked = false;
+    shareModalPassword.value = "";
+    shareModalPassword.classList.add("hidden");
+    shareModalPassword.placeholder = "Mot de passe…";
+    shareModalFormTitle.textContent = "Nouveau lien";
+    shareModalCreateBtn.textContent = "Créer le lien";
+    shareModalForm.classList.add("hidden");
+  }
+
+  function shareModalOpenFormForCreate() {
+    shareModalResetForm();
+    shareModalForm.classList.remove("hidden");
+    shareModalName.focus();
+  }
+
+  function shareModalOpenFormForEdit(share) {
+    shareModalEditingId = share.id;
+    shareModalName.value = share.name || "";
+    shareModalStreaming.checked = !!share.permissions.streaming;
+    shareModalDownload.checked = !!share.permissions.downloadHQ;
+    shareModalTrackInfo.checked = !!share.permissions.trackInfo;
+    shareModalPwToggle.checked = !!share.hasPassword;
+    shareModalPassword.value = "";
+    shareModalPassword.placeholder = share.hasPassword ? "Laisser vide pour ne pas changer" : "Mot de passe…";
+    shareModalPassword.classList.toggle("hidden", !share.hasPassword);
+    shareModalFormTitle.textContent = "Modifier le lien";
+    shareModalCreateBtn.textContent = "Enregistrer";
+    shareModalForm.classList.remove("hidden");
+    shareModalName.focus();
+  }
+
+  function shareLinkRowHtml(share) {
+    const label = share.name || (shareModalCtx && shareModalCtx.displayName) || "Lien sans nom";
+    return `
+      <div class="sc-share-link-row ${share.enabled ? "" : "sc-share-link-disabled"}" data-id="${share.id}">
+        <div class="sc-share-link-info">
+          <div class="sc-share-link-name">${escapeHtml(label)}${share.hasPassword ? " 🔒" : ""}</div>
+          <div class="sc-share-link-url">${escapeHtml(share.url)}</div>
+        </div>
+        <button type="button" class="sc-share-link-icon-btn sc-share-link-copy" title="Copier le lien" aria-label="Copier le lien">${SHARE_ICON_COPY}</button>
+        <button type="button" class="sc-share-link-icon-btn sc-share-link-edit" title="Modifier" aria-label="Modifier">${SHARE_ICON_EDIT}</button>
+        <label class="sc-toggle sc-toggle-sm" title="${share.enabled ? "Désactiver" : "Activer"}">
+          <input type="checkbox" class="sc-share-link-enable" ${share.enabled ? "checked" : ""} />
+          <span></span>
+        </label>
+        <button type="button" class="sc-share-link-icon-btn sc-share-link-delete" title="Supprimer" aria-label="Supprimer">${SHARE_ICON_TRASH}</button>
+      </div>`;
+  }
+
+  async function shareModalLoadLinks() {
+    if (!shareModalCtx) return;
+    shareModalLinks.innerHTML = `<div class="sc-empty-sub">Chargement…</div>`;
+    try {
+      const res = await fetchShareJSON(`/soundconnect/shares?targetType=${shareModalCtx.targetType}&targetId=${encodeURIComponent(shareModalCtx.targetId)}`);
+      shareModalRenderLinks(res.shares);
+    } catch (e) {
+      shareModalLinks.innerHTML = `<div class="sc-empty-sub">Erreur de chargement des liens.</div>`;
+    }
+  }
+
+  function shareModalRenderLinks(shares) {
+    if (!shares.length) {
+      shareModalLinks.innerHTML = `<div class="sc-empty-sub">Aucun lien pour l'instant.</div>`;
+      return;
+    }
+    shareModalLinks.innerHTML = shares.map(shareLinkRowHtml).join("");
+    shareModalLinks.querySelectorAll(".sc-share-link-copy").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const row = btn.closest(".sc-share-link-row");
+        const share = shares.find((s) => s.id === row.dataset.id);
+        if (!share) return;
+        navigator.clipboard?.writeText(share.url).then(
+          () => flashToast("Lien copié dans le presse-papiers."),
+          () => flashToast("Impossible de copier le lien.")
+        );
+      });
+    });
+    shareModalLinks.querySelectorAll(".sc-share-link-edit").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const row = btn.closest(".sc-share-link-row");
+        const share = shares.find((s) => s.id === row.dataset.id);
+        if (share) shareModalOpenFormForEdit(share);
+      });
+    });
+    shareModalLinks.querySelectorAll(".sc-share-link-enable").forEach((input) => {
+      input.addEventListener("change", async () => {
+        const row = input.closest(".sc-share-link-row");
+        try {
+          await fetchShareJSON(`/soundconnect/shares/${row.dataset.id}`, {
+            method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: input.checked }),
+          });
+          row.classList.toggle("sc-share-link-disabled", !input.checked);
+        } catch (e) {
+          flashToast("Impossible de mettre à jour le lien : " + (e.message || ""));
+          input.checked = !input.checked;
+        }
+      });
+    });
+    shareModalLinks.querySelectorAll(".sc-share-link-delete").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const row = btn.closest(".sc-share-link-row");
+        if (!confirm("Supprimer ce lien de partage ? Il cessera de fonctionner immédiatement.")) return;
+        try {
+          await fetchShareJSON(`/soundconnect/shares/${row.dataset.id}`, { method: "DELETE" });
+          shareModalLoadLinks();
+          flashToast("Lien supprimé.");
+        } catch (e) {
+          flashToast("Impossible de supprimer : " + (e.message || ""));
+        }
+      });
+    });
+  }
+
+  function openShareModal(targetType, targetId, displayName) {
+    shareModalCtx = { targetType, targetId, displayName };
+    shareModalTarget.textContent = displayName;
+    shareModalResetForm();
+    shareModal.classList.remove("hidden");
+    shareModalLoadLinks();
+  }
+  function closeShareModal() {
+    shareModal.classList.add("hidden");
+    shareModalCtx = null;
+  }
+  if (shareModalClose) shareModalClose.addEventListener("click", closeShareModal);
+  if (shareModal) shareModal.addEventListener("click", (e) => { if (e.target === shareModal) closeShareModal(); });
+  if (shareModalNewLinkBtn) shareModalNewLinkBtn.addEventListener("click", shareModalOpenFormForCreate);
+  if (shareModalCancelEditBtn) shareModalCancelEditBtn.addEventListener("click", shareModalResetForm);
+  if (shareModalPwToggle) {
+    shareModalPwToggle.addEventListener("change", () => {
+      shareModalPassword.classList.toggle("hidden", !shareModalPwToggle.checked);
+      if (shareModalPwToggle.checked) shareModalPassword.focus();
+    });
+  }
+  if (shareModalCreateBtn) {
+    shareModalCreateBtn.addEventListener("click", async () => {
+      if (!shareModalCtx) return;
+      const permissions = {
+        streaming: shareModalStreaming.checked,
+        downloadHQ: shareModalDownload.checked,
+        trackInfo: shareModalTrackInfo.checked,
+      };
+      shareModalCreateBtn.disabled = true;
+      try {
+        if (shareModalEditingId) {
+          const body = { name: shareModalName.value.trim() || null, permissions };
+          if (!shareModalPwToggle.checked) body.clearPassword = true;
+          else if (shareModalPassword.value) body.password = shareModalPassword.value;
+          await fetchShareJSON(`/soundconnect/shares/${shareModalEditingId}`, {
+            method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+          });
+          flashToast("Lien mis à jour.");
+        } else {
+          const body = {
+            targetType: shareModalCtx.targetType, targetId: shareModalCtx.targetId,
+            name: shareModalName.value.trim() || null, permissions,
+          };
+          if (shareModalPwToggle.checked && shareModalPassword.value) body.password = shareModalPassword.value;
+          await fetchShareJSON("/soundconnect/shares", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+          });
+          flashToast("Lien de partage créé.");
+        }
+        shareModalResetForm();
+        shareModalLoadLinks();
+      } catch (e) {
+        flashToast("Impossible d'enregistrer le lien : " + (e.message || ""));
+      } finally {
+        shareModalCreateBtn.disabled = false;
+      }
+    });
   }
 
   // ---------------------------------------------------------------------
