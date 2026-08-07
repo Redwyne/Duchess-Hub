@@ -177,14 +177,19 @@
   transition: border-color .15s ease, transform .15s ease;
 }
 .sc-tile:hover .sc-tile-cover { border-color: var(--border); transform: translateY(-2px); }
-.sc-cover-mosaic { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 2px; }
-.sc-cover-mosaic.sc-mosaic-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
-.sc-mosaic-cell {
+
+/* Covers (générées par défaut côté backend, remplaçables par upload) */
+.sc-cover-wrap { position: relative; width: 100%; height: 100%; overflow: hidden; border-radius: inherit; background: var(--sunken); }
+.sc-cover-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sc-cover-edit-btn {
+  position: absolute; inset: 0; margin: auto; width: 32px; height: 32px; border-radius: 50%;
+  background: rgba(10,10,12,.6); backdrop-filter: blur(2px); border: none; color: #fff;
   display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-head); font-weight: 700; font-size: 15px; color: rgba(255,255,255,.92);
+  opacity: 0; transition: opacity .15s ease; cursor: pointer;
 }
-.sc-cover-single { display: flex; align-items: center; justify-content: center; }
-.sc-cover-icon { font-size: 30px; color: var(--accent); opacity: .65; }
+.sc-cover-wrap:hover .sc-cover-edit-btn { opacity: 1; }
+.sc-cover-edit-btn--sm { width: 20px; height: 20px; }
+.sc-cover-edit-btn--sm svg { width: 11px; height: 11px; }
 .sc-tile-play {
   position: absolute; right: 8px; bottom: 8px;
   width: 34px; height: 34px; border-radius: 50%;
@@ -203,8 +208,7 @@
 .sc-detail-cover {
   width: 160px; height: 160px; border-radius: var(--radius-lg);
   background: var(--card); border: 1px solid var(--border-soft); flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 44px; color: var(--accent); opacity: .85; overflow: hidden;
+  overflow: hidden;
 }
 .sc-detail-info h2 { font-family: var(--font-head); font-size: clamp(22px, 3vw, 30px); font-weight: 600; margin-bottom: 6px; }
 .sc-detail-meta { font-size: 13px; color: var(--muted-2); }
@@ -228,7 +232,7 @@
 .sc-track-list { display: flex; flex-direction: column; gap: 1px; }
 .sc-track-item {
   display: grid;
-  grid-template-columns: 26px 1fr auto auto 28px;
+  grid-template-columns: 26px 34px 1fr auto auto 28px;
   align-items: center;
   gap: 14px;
   padding: 9px 10px;
@@ -241,6 +245,7 @@
 .sc-track-playbtn { display: none; width: 20px; height: 20px; align-items: center; justify-content: center; background: none; border: none; color: var(--text); cursor: pointer; font-size: 11px; }
 .sc-track-item:hover .sc-track-playbtn, .sc-track-item.playing .sc-track-playbtn { display: flex; }
 .sc-track-item.playing .sc-track-playbtn { color: var(--accent); }
+.sc-track-cover { width: 34px; height: 34px; border-radius: var(--radius-sm); overflow: hidden; flex-shrink: 0; }
 .sc-track-title-cell { min-width: 0; display: flex; flex-direction: column; }
 .sc-track-name { font-size: 13.5px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 7px; }
 .sc-track-item.playing .sc-track-name { color: var(--accent-2); }
@@ -290,7 +295,9 @@
   width: 42px; height: 42px; border-radius: var(--radius-sm);
   background: linear-gradient(135deg, var(--accent), var(--accent-3));
   display: flex; align-items: center; justify-content: center; color: #0b0b0d; font-size: 17px; flex-shrink: 0;
+  overflow: hidden;
 }
+.sc-player-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .sc-player-text { min-width: 0; }
 .sc-player-title { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sc-player-artist { font-size: 11.5px; color: var(--muted-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

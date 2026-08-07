@@ -28,11 +28,13 @@ Etat v2 (styles étendus) :
 """
 
 import base64
+import colorsys
 import datetime
 import difflib
 import hashlib
 import hmac
 import json
+import mimetypes
 import os
 import re
 import shutil
@@ -49,7 +51,7 @@ from typing import List, Optional
 import requests
 from fastapi import Body, Depends, FastAPI, Form, Header, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -2096,9 +2098,9 @@ def soundconnect_sync():
 # ci-dessous correspond exactement aux tables prévues (workspaces/folders/tracks/
 # folderTracks).
 ARK_ARTISTS = {
-    "BENDE", "BILLIE", "CLEMENT HERFORT", "DAYSY", "JULIEN ANDRIANA",
-    "LENNON", "NAUMAUR", "ROMAIN MIALDEA", "TW", "WAREND",
-}  # reste du roster (COBALT, HEROE, JOSEPH KAMEL, PIERRE GARNIER...) -> espace "DUCHESS"
+    "BENDE", "LENNON", "NAUMAUR", "TW", "WAREND",
+}  # reste du roster (BILLIE, CLEMENT HERFORT, COBALT, DAYSY, HEROE, JOSEPH KAMEL,
+   # JULIEN ANDRIANA, PIERRE GARNIER, ROMAIN MIALDEA...) -> espace "DUCHESS"
 
 
 def _now_iso() -> str:
@@ -2196,12 +2198,46 @@ def _org_link_track(data: dict, folder_id: str, track_id: str):
         lst.append(track_id)
 
 
+def _org_reconcile_workspaces(data: dict) -> bool:
+    """Auto-corrige les dossiers artiste déjà créés dont l'espace (ARK/DUCHESS) ne
+    correspond plus au roster ARK_ARTISTS courant (ex. roster corrigé après coup).
+    Déplace le dossier artiste ET tous ses descendants (projets/playlists) vers le
+    bon espace, sans toucher aux titres liés (folderTracks référence des IDs de
+    dossier, pas d'espace). Appelé à chaque sync pour rester auto-réparant."""
+    ws_by_name = {ws["name"]: wid for wid, ws in data["workspaces"].items()}
+    changed_any = False
+    for f in list(data["folders"].values()):
+        if f["kind"] != "folder" or f.get("parentId") is not None:
+            continue  # seuls les dossiers artiste (racine) sont classés par roster
+        correct_ws_name = _org_workspace_for_artist(f["name"])
+        correct_ws_id = ws_by_name.get(correct_ws_name)
+        if not correct_ws_id:
+            correct_ws_id = _org_ensure_workspace(data, correct_ws_name)
+            ws_by_name[correct_ws_name] = correct_ws_id
+        if f["workspaceId"] == correct_ws_id:
+            continue
+        to_move = {f["id"]}
+        grew = True
+        while grew:
+            grew = False
+            for child in data["folders"].values():
+                if child.get("parentId") in to_move and child["id"] not in to_move:
+                    to_move.add(child["id"])
+                    grew = True
+        for fid in to_move:
+            data["folders"][fid]["workspaceId"] = correct_ws_id
+        changed_any = True
+    return changed_any
+
+
 def _org_ingest(raw_tracks: list) -> dict:
     """Classe automatiquement les NOUVEAUX titres PHONO : espace (ARK/DUCHESS selon le
     roster) -> dossier artiste -> projet titre. Un titre déjà connu garde sa métadonnée
     à jour (ex. downloadUrl, qui expire côté SharePoint) mais n'est jamais redéplacé —
     si l'équipe l'a réorganisé ailleurs entretemps, ce choix est respecté."""
     data = _org_load()
+    _org_reconcile_workspaces(data)  # corrige d'abord les classements existants avant
+    # de traiter les nouveaux titres, pour ne jamais créer de dossier artiste en double.
     for raw in raw_tracks:
         ws_id = _org_ensure_workspace(data, _org_workspace_for_artist(raw["artist"]))
         artist_folder_id = _org_ensure_folder(data, ws_id, None, raw["artist"], "folder")
@@ -2375,3 +2411,166 @@ def soundconnect_search_tracks(q: str = ""):
         tracks = [t for t in tracks if ql in t["artist"].lower() or ql in t["title"].lower()]
     tracks.sort(key=lambda t: (t["artist"].lower(), t["title"].lower()))
     return {"tracks": tracks}
+
+
+# --------------------------------------------------------------------------
+# Sound Connect — covers (auto-générées si absentes, uploadables sinon)
+# --------------------------------------------------------------------------
+# Chaque espace / dossier / projet / playlist / titre a une "cover" accessible à la
+# même URL stable GET /soundconnect/covers/{kind}/{id}, qu'elle ait été uploadée par
+# l'équipe ou non : si aucun fichier perso n'existe, un design simple (dégradé +
+# initiales, dérivé de façon déterministe de l'id) est généré à la volée en SVG — pas
+# de dépendance lourde (Pillow) requise. L'upload (POST, multipart) remplace ce
+# placeholder par une vraie image ; le DELETE revient au design généré.
+COVER_KINDS = {"workspace", "folder", "track"}
+COVERS_DIR = DATA_DIR / "covers"
+COVERS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _xml_escape(s: str) -> str:
+    return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _cover_initials(name: str) -> str:
+    words = [w for w in re.split(r"\s+", (name or "").strip()) if w]
+    if not words:
+        return "?"
+    if len(words) == 1:
+        return words[0][:2].upper()
+    return (words[0][0] + words[1][0]).upper()
+
+
+def _hsl_hex(hue_deg: float, sat_pct: float, light_pct: float) -> str:
+    """HSL -> #rrggbb. On évite hsl(...) dans le SVG : pas garanti supporté par tous
+    les moteurs de rendu (ex. rasterizers serveur), contrairement au hex qui l'est partout."""
+    r, g, b = colorsys.hls_to_rgb(hue_deg / 360.0, light_pct / 100.0, sat_pct / 100.0)
+    return f"#{int(round(r * 255)):02x}{int(round(g * 255)):02x}{int(round(b * 255)):02x}"
+
+
+def _cover_svg(seed: str, label: str) -> bytes:
+    h = 0
+    for ch in seed or "":
+        h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+    hue1 = h % 360
+    hue2 = (hue1 + 46) % 360
+    blob_hue = (hue1 + 190) % 360
+    initials = _xml_escape(_cover_initials(label))
+    c1, c2 = _hsl_hex(hue1, 58, 40), _hsl_hex(hue2, 58, 24)
+    blob1, blob2 = _hsl_hex(blob_hue, 60, 55), _hsl_hex(hue2, 60, 18)
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="{c1}" />
+      <stop offset="100%" stop-color="{c2}" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#g)" />
+  <circle cx="404" cy="104" r="150" fill="{blob1}" opacity="0.16" />
+  <circle cx="86" cy="432" r="190" fill="{blob2}" opacity="0.28" />
+  <text x="256" y="290" font-family="Helvetica Neue, Arial, sans-serif" font-size="168"
+        font-weight="700" fill="rgba(255,255,255,0.92)" text-anchor="middle"
+        dominant-baseline="middle" letter-spacing="2">{initials}</text>
+</svg>"""
+    return svg.encode("utf-8")
+
+
+def _cover_entity_name(data: dict, kind: str, entity_id: str) -> Optional[str]:
+    if kind == "workspace":
+        ws = data["workspaces"].get(entity_id)
+        return ws["name"] if ws else None
+    if kind == "folder":
+        f = data["folders"].get(entity_id)
+        return f["name"] if f else None
+    if kind == "track":
+        t = data["tracks"].get(entity_id)
+        return f'{t["artist"]} {t["title"]}' if t else None
+    return None
+
+
+def _cover_r2_key(kind: str, entity_id: str, ext: str) -> str:
+    return f"soundconnect/covers/{kind}_{entity_id}{ext}"
+
+
+def _cover_local_file(kind: str, entity_id: str) -> Optional[Path]:
+    matches = list(COVERS_DIR.glob(f"{kind}_{entity_id}.*"))
+    return matches[0] if matches else None
+
+
+@app.get("/soundconnect/covers/{kind}/{entity_id}")
+def soundconnect_get_cover(kind: str, entity_id: str):
+    if kind not in COVER_KINDS:
+        raise HTTPException(status_code=404, detail="Type de cover inconnu.")
+    local = _cover_local_file(kind, entity_id)
+    if local:
+        media_type = mimetypes.guess_type(local.name)[0] or "application/octet-stream"
+        return Response(content=local.read_bytes(), media_type=media_type, headers={"Cache-Control": "public, max-age=3600"})
+    if R2_ENABLED:
+        try:
+            client = get_r2_client()
+            for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+                try:
+                    obj = client.get_object(Bucket=R2_BUCKET_NAME, Key=_cover_r2_key(kind, entity_id, ext))
+                    body = obj["Body"].read()
+                    (COVERS_DIR / f"{kind}_{entity_id}{ext}").write_bytes(body)
+                    media_type = mimetypes.guess_type(ext)[0] or "application/octet-stream"
+                    return Response(content=body, media_type=media_type, headers={"Cache-Control": "public, max-age=3600"})
+                except Exception:  # noqa: BLE001 — pas cette extension, tente la suivante
+                    continue
+        except Exception:  # noqa: BLE001 — R2 indisponible, on retombe sur le placeholder
+            pass
+    data = _org_load()
+    name = _cover_entity_name(data, kind, entity_id)
+    if name is None:
+        raise HTTPException(status_code=404, detail="Élément introuvable.")
+    return Response(content=_cover_svg(entity_id, name), media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=300"})
+
+
+@app.post("/soundconnect/covers/{kind}/{entity_id}")
+async def soundconnect_upload_cover(kind: str, entity_id: str, file: UploadFile = File(...)):
+    if kind not in COVER_KINDS:
+        raise HTTPException(status_code=404, detail="Type de cover inconnu.")
+    data = _org_load()
+    if _cover_entity_name(data, kind, entity_id) is None:
+        raise HTTPException(status_code=404, detail="Élément introuvable.")
+    raw = await file.read()
+    if len(raw) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image trop lourde (8 Mo max).")
+    ext = mimetypes.guess_extension((file.content_type or "").split(";")[0].strip()) or Path(file.filename or "").suffix or ".jpg"
+    if ext == ".jpe":
+        ext = ".jpg"
+    for old in COVERS_DIR.glob(f"{kind}_{entity_id}.*"):
+        old.unlink(missing_ok=True)
+    (COVERS_DIR / f"{kind}_{entity_id}{ext}").write_bytes(raw)
+    if R2_ENABLED:
+        try:
+            client = get_r2_client()
+            client.put_object(
+                Bucket=R2_BUCKET_NAME,
+                Key=_cover_r2_key(kind, entity_id, ext),
+                Body=raw,
+                ContentType=file.content_type or "application/octet-stream",
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[R2] sauvegarde cover Sound Connect échouée : {e}")
+    return {"coverUrl": f"/soundconnect/covers/{kind}/{entity_id}?v={int(time.time())}"}
+
+
+@app.delete("/soundconnect/covers/{kind}/{entity_id}")
+def soundconnect_delete_cover(kind: str, entity_id: str):
+    if kind not in COVER_KINDS:
+        raise HTTPException(status_code=404, detail="Type de cover inconnu.")
+    removed = False
+    for old in COVERS_DIR.glob(f"{kind}_{entity_id}.*"):
+        old.unlink(missing_ok=True)
+        removed = True
+    if R2_ENABLED:
+        try:
+            client = get_r2_client()
+            for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+                try:
+                    client.delete_object(Bucket=R2_BUCKET_NAME, Key=_cover_r2_key(kind, entity_id, ext))
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
+            pass
+    return {"removed": removed}

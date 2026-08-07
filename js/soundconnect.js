@@ -129,6 +129,64 @@
     return `hsl(${hue}, 46%, 38%)`;
   }
 
+  // ---------------------------------------------------------------------
+  // Covers (générées côté backend si absentes, uploadables depuis n'importe
+  // quelle tuile / en-tête / ligne de titre — même URL stable dans les deux cas).
+  // ---------------------------------------------------------------------
+
+  function coverUrl(kind, id) {
+    return `${BACKEND_BASE_URL}/soundconnect/covers/${kind}/${encodeURIComponent(id)}`;
+  }
+
+  function coverBlockHtml(kind, id, editSize) {
+    return `
+      <div class="sc-cover-wrap" data-cover-kind="${kind}" data-cover-id="${escapeHtml(id)}">
+        <img class="sc-cover-img" src="${coverUrl(kind, id)}" alt="" loading="lazy" />
+        <button type="button" class="sc-cover-edit-btn ${editSize || ""}" title="Changer la cover" aria-label="Changer la cover">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+        </button>
+      </div>`;
+  }
+
+  const coverFileInput = document.createElement("input");
+  coverFileInput.type = "file";
+  coverFileInput.accept = "image/*";
+  coverFileInput.style.display = "none";
+  document.body.appendChild(coverFileInput);
+  let pendingCoverTarget = null;
+
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest(".sc-cover-edit-btn");
+    if (!btn) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const wrap = btn.closest("[data-cover-kind]");
+    if (!wrap) return;
+    pendingCoverTarget = { kind: wrap.dataset.coverKind, id: wrap.dataset.coverId };
+    coverFileInput.value = "";
+    coverFileInput.click();
+  });
+
+  coverFileInput.addEventListener("change", async () => {
+    const file = coverFileInput.files[0];
+    const target = pendingCoverTarget;
+    pendingCoverTarget = null;
+    if (!file || !target) return;
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      const r = await fetch(coverUrl(target.kind, target.id), { method: "POST", body: fd });
+      if (!r.ok) throw new Error("upload échoué");
+      const data = await r.json();
+      const freshUrl = BACKEND_BASE_URL + data.coverUrl;
+      document
+        .querySelectorAll(`[data-cover-kind="${target.kind}"][data-cover-id="${CSS.escape(target.id)}"] .sc-cover-img`)
+        .forEach((img) => { img.src = freshUrl; });
+    } catch (e) {
+      alert("Échec de l'upload de la cover — réessaie dans un instant.");
+    }
+  });
+
   function badgeFor(track) {
     if (track.versionConfidence === "unresolved") return '<span class="sc-badge sc-badge-unresolved" title="Aucune version 44kHz ou non-instru trouvée">non résolu</span>';
     if (track.versionConfidence === "fallback") return '<span class="sc-badge sc-badge-fallback" title="Nommage non standard, meilleure estimation">à vérifier</span>';
@@ -199,14 +257,11 @@
   // Tuiles
   // ---------------------------------------------------------------------
 
-  function tileHtml({ id, name, kind, meta, preview, showPlay }) {
-    const cells = (preview && preview.length ? preview : [name]).slice(0, 4);
-    const mosaicClass = cells.length <= 1 ? "sc-mosaic-1" : "";
-    const coverInner = cells.map((label) => `<div class="sc-mosaic-cell" style="background:${hashColor(label)}">${escapeHtml(initials(label))}</div>`).join("");
+  function tileHtml({ id, name, kind, coverKind, meta, showPlay }) {
     return `
       <div class="sc-tile" data-id="${id}" data-name="${escapeHtml(name)}" data-kind="${kind}">
-        <div class="sc-tile-cover sc-cover-mosaic ${mosaicClass}">
-          ${coverInner}
+        <div class="sc-tile-cover">
+          ${coverBlockHtml(coverKind, id)}
           ${showPlay ? `<button type="button" class="sc-tile-play" data-play-id="${id}" aria-label="Lire">▶</button>` : ""}
         </div>
         <div class="sc-tile-name">${escapeHtml(name)}</div>
@@ -220,13 +275,13 @@
       return;
     }
     contentEl.innerHTML = `<div class="sc-tile-grid">${folders.map((f) => tileHtml({
-      id: f.id, name: f.name, kind: f.kind,
+      id: f.id, name: f.name, kind: f.kind, coverKind: "folder",
       meta: f.childCount ? `${f.childCount} élément${f.childCount > 1 ? "s" : ""}` : `${f.trackCount} titre${f.trackCount > 1 ? "s" : ""}`,
-      preview: f.preview, showPlay: f.trackCount > 0 && f.childCount === 0,
+      showPlay: f.trackCount > 0 && f.childCount === 0,
     })).join("")}</div>`;
     contentEl.querySelectorAll(".sc-tile").forEach((el) => {
       el.addEventListener("click", (e) => {
-        if (e.target.closest(".sc-tile-play")) return;
+        if (e.target.closest(".sc-tile-play") || e.target.closest(".sc-cover-edit-btn")) return;
         onTileClick(el.dataset.id, el.dataset.name);
       });
     });
@@ -257,11 +312,14 @@
         return;
       }
       contentEl.innerHTML = `<div class="sc-tile-grid">${res.workspaces.map((ws) => tileHtml({
-        id: ws.id, name: ws.name, kind: "workspace",
-        meta: `${ws.folderCount} dossier${ws.folderCount > 1 ? "s" : ""}`, preview: ws.preview,
+        id: ws.id, name: ws.name, kind: "workspace", coverKind: "workspace",
+        meta: `${ws.folderCount} dossier${ws.folderCount > 1 ? "s" : ""}`,
       })).join("")}</div>`;
       contentEl.querySelectorAll(".sc-tile").forEach((el) => {
-        el.addEventListener("click", () => showWorkspace(el.dataset.id, el.dataset.name));
+        el.addEventListener("click", (e) => {
+          if (e.target.closest(".sc-cover-edit-btn")) return;
+          showWorkspace(el.dataset.id, el.dataset.name);
+        });
       });
     } catch (e) {
       contentEl.innerHTML = emptyStateHtml("Erreur de chargement.");
@@ -324,7 +382,7 @@
     const tracks = detail.tracks;
     contentEl.innerHTML = `
       <div class="sc-detail-head">
-        <div class="sc-detail-cover">${tracks.length ? escapeHtml(initials(f.name)) : "♪"}</div>
+        <div class="sc-detail-cover">${coverBlockHtml("folder", f.id)}</div>
         <div class="sc-detail-info">
           <h2>${escapeHtml(f.name)}</h2>
           <div class="sc-detail-meta">${f.kind === "playlist" ? "Playlist" : "Projet"} · ${tracks.length} titre${tracks.length > 1 ? "s" : ""}</div>
@@ -346,6 +404,7 @@
       <div class="sc-track-item" data-track-id="${t.id}">
         <div class="sc-track-index">${i + 1}</div>
         <button type="button" class="sc-track-playbtn" data-idx="${i}">▶</button>
+        <div class="sc-track-cover">${coverBlockHtml("track", t.id, "sc-cover-edit-btn--sm")}</div>
         <div class="sc-track-title-cell">
           <div class="sc-track-name">${escapeHtml(t.title)} ${badgeFor(t)}</div>
           <div class="sc-track-sub">${escapeHtml(t.artist)}</div>
@@ -357,7 +416,7 @@
     `).join("");
     container.querySelectorAll(".sc-track-playbtn, .sc-track-item").forEach((el) => {
       el.addEventListener("click", (e) => {
-        if (e.target.closest(".sc-track-link") || e.target.closest(".sc-track-menu")) return;
+        if (e.target.closest(".sc-track-link") || e.target.closest(".sc-track-menu") || e.target.closest(".sc-cover-edit-btn")) return;
         const item = e.currentTarget.closest(".sc-track-item") || e.currentTarget;
         const idx = [...container.querySelectorAll(".sc-track-item")].indexOf(item);
         if (idx >= 0) playQueue(tracks, idx);
@@ -547,7 +606,7 @@
     audioEl.play().catch(() => {});
     playerTitleEl.textContent = t.title;
     playerArtistEl.textContent = t.artist;
-    playerArt.textContent = initials(t.title);
+    playerArt.innerHTML = `<img src="${coverUrl("track", t.id)}" alt="" />`;
     player.classList.remove("hidden");
     updatePlayingHighlight();
   }
