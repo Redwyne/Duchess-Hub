@@ -1093,7 +1093,7 @@
   let volumeBeforeMute = 1;
   function updateVolumeUI() {
     const vol = audioEl.volume;
-    volumeEl.style.setProperty("--pct", Math.round(vol * 100) + "%");
+    volumeEl.style.setProperty("--pct", Math.round(vol * 100));
     const level = vol === 0 ? "muted" : vol < 0.5 ? "low" : "high";
     const icons = {
       muted: '<path d="M16 9l-6 6M10 9l6 6"></path><polygon points="4 8 8 8 12 4 12 20 8 16 4 16 4 8"></polygon>',

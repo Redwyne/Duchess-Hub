@@ -440,22 +440,34 @@ input[type="range"].sc-seek::-moz-range-track { background: transparent; border:
 .sc-volume-icon:hover { color: var(--text); background: var(--sunken); }
 .sc-volume-icon svg { width: 16px; height: 16px; }
 
+/* Le rond (13px) se déplace en réalité entre 6.5px et (largeur - 6.5px) — pas
+   sur toute la largeur — car un <input type="range"> insère toujours son
+   thumb de son propre rayon à chaque extrémité. Un remplissage calculé en %
+   brut de la largeur totale (comme avant) désynchronise donc visuellement le
+   rond et le bord du remplissage, surtout près des extrémités. Ce calc()
+   reproduit exactement la même formule que le rendu natif du thumb. */
 input[type="range"].sc-volume {
+  /* Le rond est en réalité une boîte de 13px pile (l'anneau autour est un
+     box-shadow, qui ne compte pas dans sa taille de mise en page) — donc son
+     rayon de déplacement est bien 6.5px, comme la formule ci-dessous. */
+  --thumb: 13px;
   -webkit-appearance: none; appearance: none;
   width: 88px; height: 5px; border-radius: 99px; outline: none; cursor: pointer;
-  background: linear-gradient(to right, var(--accent) 0 var(--pct, 100%), var(--border) var(--pct, 100%) 100%);
+  background: linear-gradient(to right,
+    var(--accent) 0 calc((100% - var(--thumb)) * var(--pct, 100) / 100 + (var(--thumb) / 2)),
+    var(--border) calc((100% - var(--thumb)) * var(--pct, 100) / 100 + (var(--thumb) / 2)) 100%);
 }
 input[type="range"].sc-volume::-webkit-slider-thumb {
   -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%;
-  background: var(--text); border: 2px solid var(--panel);
-  box-shadow: 0 1px 5px rgba(0,0,0,.35); cursor: pointer;
+  background: var(--text); border: none; box-sizing: border-box;
+  box-shadow: 0 0 0 2px var(--panel), 0 1px 5px rgba(0,0,0,.35); cursor: pointer;
   transition: transform .12s ease;
 }
 input[type="range"].sc-volume:hover::-webkit-slider-thumb,
 input[type="range"].sc-volume:active::-webkit-slider-thumb { transform: scale(1.15); }
 input[type="range"].sc-volume::-moz-range-thumb {
   width: 13px; height: 13px; border-radius: 50%; background: var(--text);
-  border: 2px solid var(--panel); cursor: pointer;
+  border: none; box-shadow: 0 0 0 2px var(--panel); cursor: pointer;
 }
 input[type="range"].sc-volume::-moz-range-track { background: var(--border); height: 5px; border-radius: 99px; }
 input[type="range"].sc-volume::-moz-range-progress { background: var(--accent); height: 5px; border-radius: 99px; }
