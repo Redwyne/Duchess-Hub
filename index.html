@@ -773,55 +773,96 @@
 
 <!-- ============================= ONGLET SOUND CONNECT ============================= -->
 <div id="tab-soundconnect" class="tab-panel">
-<main class="sc-layout">
+<div class="sc-shell">
 
-  <div class="sc-header">
-    <div class="sc-header-text">
-      <div class="guide-kicker">Base audio Duchess</div>
-      <h1>Sound Connect</h1>
+  <aside class="sc-sidebar">
+    <div class="sc-sidebar-top">
+      <button type="button" class="sc-nav-item active" id="sc-nav-home" data-sc-view="home">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/></svg>
+        Home
+      </button>
+      <button type="button" class="sc-nav-item" id="sc-nav-search" data-sc-view="search">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        Search
+      </button>
     </div>
-    <div class="sc-header-actions">
+
+    <div class="sc-sidebar-section">
+      <div class="sc-sidebar-label">Library</div>
+      <div class="sc-workspace-list" id="sc-workspaceList"></div>
+      <button type="button" class="sc-sidebar-add" id="sc-addWorkspaceBtn">+ Nouvel espace</button>
+    </div>
+
+    <div class="sc-sidebar-foot">
       <div class="sc-sync-status" id="sc-syncStatus">Pas encore synchronisé</div>
-      <button type="button" class="sc-btn sc-btn-primary" id="sc-syncBtn">Rafraîchir le catalogue</button>
+      <button type="button" class="sc-btn sc-btn-primary sc-btn-sm" id="sc-syncBtn">Rafraîchir PHONO</button>
     </div>
-  </div>
+  </aside>
 
-  <div class="sc-toolbar">
-    <div class="sc-search">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-      <input type="search" id="sc-search" placeholder="Chercher un artiste ou un titre…" autocomplete="off" />
+  <main class="sc-main">
+    <div class="sc-topbar">
+      <div class="sc-breadcrumb" id="sc-breadcrumb"></div>
+      <div class="sc-topbar-actions" id="sc-topbarActions"></div>
     </div>
-    <div class="sc-count" id="sc-count">0 titre</div>
-  </div>
+    <div class="sc-content" id="sc-content"></div>
+  </main>
 
-  <div class="sc-list" id="sc-list">
-    <div class="sc-empty" id="sc-empty">
-      <div class="sc-empty-icon">♪</div>
-      <p>Aucun titre synchronisé pour l'instant.</p>
-      <p class="sc-empty-sub">Clique sur « Rafraîchir le catalogue » — le premier scan du dossier PHONO prend environ une minute.</p>
-    </div>
-  </div>
-
-  <div class="sc-unresolved hidden" id="sc-unresolved">
-    <button type="button" class="sc-unresolved-toggle" id="sc-unresolvedToggle">
-      <span id="sc-unresolvedCount">0</span> dossier(s) au nommage non standard, à vérifier manuellement <span class="sc-chev">▾</span>
-    </button>
-    <div class="sc-unresolved-list hidden" id="sc-unresolvedList"></div>
-  </div>
-
-</main>
+</div>
 
 <div class="sc-player hidden" id="sc-player">
-  <div class="sc-player-meta">
-    <div class="sc-player-art">♪</div>
+  <audio id="sc-audio" preload="none"></audio>
+  <div class="sc-player-left">
+    <div class="sc-player-art" id="sc-playerArt">♪</div>
     <div class="sc-player-text">
       <div class="sc-player-title" id="sc-playerTitle">—</div>
       <div class="sc-player-artist" id="sc-playerArtist">—</div>
     </div>
   </div>
-  <audio id="sc-audio" controls preload="none"></audio>
-  <button type="button" class="sc-player-close" id="sc-playerClose" aria-label="Fermer le lecteur">✕</button>
+  <div class="sc-player-center">
+    <div class="sc-player-transport">
+      <button type="button" class="sc-transport-btn" id="sc-prevBtn" title="Précédent">⏮</button>
+      <button type="button" class="sc-transport-btn sc-transport-play" id="sc-playPauseBtn" title="Lecture / Pause">▶</button>
+      <button type="button" class="sc-transport-btn" id="sc-nextBtn" title="Suivant">⏭</button>
+    </div>
+    <div class="sc-player-progress">
+      <span class="sc-time" id="sc-timeCurrent">0:00</span>
+      <input type="range" class="sc-seek" id="sc-seek" min="0" max="1000" value="0" />
+      <span class="sc-time" id="sc-timeTotal">0:00</span>
+    </div>
+  </div>
+  <div class="sc-player-right">
+    <input type="range" class="sc-volume" id="sc-volume" min="0" max="100" value="100" title="Volume" />
+    <button type="button" class="sc-player-close" id="sc-playerClose" aria-label="Fermer le lecteur">✕</button>
+  </div>
 </div>
+
+<!-- Modale : ajouter des titres du catalogue à un dossier/playlist -->
+<div class="sc-modal-overlay hidden" id="sc-addModal">
+  <div class="sc-modal">
+    <div class="sc-modal-head">
+      <h3>Ajouter des titres</h3>
+      <button type="button" class="sc-modal-close" id="sc-addModalClose">✕</button>
+    </div>
+    <div class="sc-search sc-modal-search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+      <input type="search" id="sc-addModalSearch" placeholder="Chercher un artiste ou un titre du catalogue…" autocomplete="off" />
+    </div>
+    <div class="sc-modal-results" id="sc-addModalResults"></div>
+  </div>
+</div>
+
+<!-- Modale : nouvel espace / dossier / playlist -->
+<div class="sc-modal-overlay hidden" id="sc-newModal">
+  <div class="sc-modal sc-modal-sm">
+    <div class="sc-modal-head">
+      <h3 id="sc-newModalTitle">Nouveau dossier</h3>
+      <button type="button" class="sc-modal-close" id="sc-newModalClose">✕</button>
+    </div>
+    <input type="text" id="sc-newModalName" placeholder="Nom…" />
+    <button type="button" class="sc-btn sc-btn-primary" id="sc-newModalConfirm">Créer</button>
+  </div>
+</div>
+
 </div>
 
 <div id="tab-strategie" class="tab-panel">

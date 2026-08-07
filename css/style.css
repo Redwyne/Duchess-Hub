@@ -14,6 +14,7 @@
   --warn: #f0ab3d;
   --tip-text: #e3b568;
   --shadow-color: rgba(0,0,0,0.6);
+  --row-hover: rgba(255,255,255,0.02);
   --radius-lg: 22px;
   --radius-md: 14px;
   --radius-sm: 9px;
@@ -31,20 +32,28 @@
 /* ---------------- Mode clair ---------------- */
 /* Basculé via data-theme="light" sur <html> (voir js/theme.js). Seules les
    teintes neutres changent — les couleurs d'accent par onglet restent les
-   mêmes, elles sont déjà assez saturées pour rester lisibles sur fond clair. */
+   mêmes, elles sont déjà assez saturées pour rester lisibles sur fond clair.
+   V2 (contraste) : l'ancienne palette avait --bg/--panel/--card quasi
+   identiques (blancs à 1-2% d'écart) et des bordures à peine visibles
+   (#e1e1e8 sur blanc) — résultat plat, trop blanc, fatigant pour les yeux.
+   Ici le fond est un gris-bleu franchement plus soutenu, les cartes blanches
+   s'en détachent nettement (vraie sensation d'élévation), le "sunken" est
+   visiblement en retrait, et bordures/textes sont assez foncés pour se voir
+   sans avoir à plisser les yeux. */
 html[data-theme="light"] {
-  --bg: #f5f5f8;
+  --bg: #e4e8ef;
   --panel: #ffffff;
-  --panel-2: #f0f0f4;
-  --card: #ffffff;
-  --border: #e1e1e8;
-  --border-soft: #eaeaf0;
-  --sunken: #eef0f4;
-  --text: #15151b;
-  --muted: #5b5b68;
-  --muted-2: #83838f;
-  --tip-text: #8a5a12;
-  --shadow-color: rgba(20,20,30,0.12);
+  --panel-2: #eef1f6;
+  --card: #f9fafc;
+  --border: #cad0dc;
+  --border-soft: #dde1e9;
+  --sunken: #e7eaf1;
+  --text: #12141c;
+  --muted: #4b5163;
+  --muted-2: #6b7184;
+  --tip-text: #8a4f0c;
+  --shadow-color: rgba(16,20,34,0.16);
+  --row-hover: rgba(16,20,34,0.045);
   color-scheme: light;
 }
 
@@ -1221,7 +1230,7 @@ input[type="color"] {
   padding: 0 16px;
   width: 100%;
   border-radius: var(--radius-sm);
-  background: #0d0d11;
+  background: var(--sunken);
   border: 1px solid var(--border);
   color: var(--muted);
   font-size: 13.5px;

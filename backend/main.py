@@ -77,14 +77,20 @@ DB_PATH = DATA_DIR / "app.db"
 FLOWSTAGE_API_KEY = os.environ.get("FLOWSTAGE_API_KEY", "")
 FLOWSTAGE_BASE_URL = "https://api.theflowstage.com"
 
-# Clé API Anthropic (console.anthropic.com) — quand elle est renseignée, une passe de
-# correction grammaticale/orthographique via Claude est appliquée sur les paroles issues de
-# whisper (JAMAIS sur les paroles Flowstage, déjà vérifiées humainement, ni sur une correction
-# manuelle de Michel dans "Vérifier les paroles"). Corrige les homophones/fautes de transcription
-# ("il s'aime"/"ils s'aiment"...) sans reformuler le style ou l'argot volontaire. Toujours
-# activée dès que la clé est présente — pas d'option par job (décision explicite de Michel :
-# "si je vois que ça crée trop de soucis je l'enlèverai"). Voir correct_lyrics_with_claude().
+# Clé API Anthropic (console.anthropic.com) — quand elle est renseignée ET que
+# ENABLE_CLAUDE_CORRECTION est vraie, une passe de correction grammaticale/orthographique via
+# Claude est appliquée sur les paroles issues de whisper (JAMAIS sur les paroles Flowstage,
+# déjà vérifiées humainement, ni sur une correction manuelle de Michel dans "Vérifier les
+# paroles"). Corrige en théorie les homophones/fautes de transcription ("il s'aime"/"ils
+# s'aiment"...) sans reformuler le style ou l'argot volontaire.
+# DÉSACTIVÉE (2026-08-07) à la demande de Michel : "la correction IA claude change des choses
+# qui ne fonctionnent pas" — en test réel elle modifiait parfois des lignes déjà correctes.
+# Décision d'origine était "pas d'option par job, si je vois que ça crée trop de soucis je
+# l'enlèverai" (voir correct_lyrics_with_claude()) — c'est ce cas de figure. Gardée dans le code
+# (pas supprimée) pour pouvoir la remettre en un flag si les tests whisper seul ne suffisent
+# pas. `ENABLE_CLAUDE_CORRECTION=true` en variable d'env sur Render la réactive.
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ENABLE_CLAUDE_CORRECTION = os.environ.get("ENABLE_CLAUDE_CORRECTION", "false").strip().lower() in ("1", "true", "on", "yes")
 # Sonnet plutôt que Haiku : la tâche (repérer un accord singulier/pluriel fautif à partir du
 # sens et de la cohérence d'un refrain répété) demande un vrai raisonnement contextuel, pas
 # juste de la reconnaissance de motifs — et le volume de texte par appel (les paroles d'un
@@ -760,7 +766,7 @@ def correct_lyrics_with_claude(phrases, artiste: str = "", titre: str = "", refe
     la version avec référence corrige les deux. Les lignes transcrites qui ne correspondent à
     aucune ligne de la référence (partie du morceau non couverte par l'extrait fourni) retombent
     sur la correction grammaticale habituelle, jamais sur une invention."""
-    if not ANTHROPIC_API_KEY or not phrases:
+    if not ANTHROPIC_API_KEY or not phrases or not ENABLE_CLAUDE_CORRECTION:
         return None
     try:
         import anthropic
@@ -873,7 +879,7 @@ def _apply_claude_correction(words, granularity: str, artiste: str = "", titre: 
     (_interpolate_words, moins précise mais ne dépend pas d'avoir le fichier audio sous la
     main). Renvoie None si la correction n'a pas pu être appliquée (clé absente, échec API,
     désaccord de nombre de lignes)."""
-    if not ANTHROPIC_API_KEY or not words:
+    if not ANTHROPIC_API_KEY or not words or not ENABLE_CLAUDE_CORRECTION:
         return None
     phrases = words if granularity == "phrase" else _words_to_phrases(words)
     if not phrases:
@@ -1886,6 +1892,12 @@ async def budget_delete_project(file_id: str, sheet_name: str, file_name: str, _
 # artiste + ~1 par titre, soit plusieurs dizaines de secondes) : GET
 # /soundconnect/catalog sert ce cache, POST /soundconnect/sync le reconstruit.
 SOUNDCONNECT_CACHE_PATH = DATA_DIR / "soundconnect_catalog.json"
+# Couche d'organisation indépendante (espaces / dossiers / projets / playlists) — voir
+# section "Organisation indépendante" plus bas. PHONO (et plus tard un second dossier
+# SharePoint pour les démos/maquettes) n'est qu'une SOURCE de fichiers parmi d'autres ;
+# cette organisation ne reflète jamais 1:1 l'arborescence SharePoint, elle est éditable
+# librement par l'équipe et ne fait que référencer les titres ingérés.
+SOUNDCONNECT_ORG_PATH = DATA_DIR / "soundconnect_org.json"
 
 # Un nom de fichier "44Khz" fait foi ; "44.1khz"/"44 khz" tolérés aussi. Tout
 # fichier INSTRU/PBO/ACAP est une variante technique, jamais LA version du titre.
@@ -2042,9 +2054,312 @@ def soundconnect_sync():
         "syncedAt": datetime.datetime.utcnow().isoformat() + "Z",
     }
     _sc_save_cache(payload)
+    # Ingestion dans la couche d'organisation indépendante (espaces/dossiers/projets) —
+    # voir section dédiée juste en dessous. N'écrase jamais une réorganisation déjà faite
+    # par l'équipe : seuls les NOUVEAUX titres (jamais vus) sont classés automatiquement.
+    _org_ingest(result["tracks"])
     return {
         "synced": True,
         "count": len(payload["tracks"]),
         "unresolvedCount": len(payload["unresolvedFolders"]),
         "syncedAt": payload["syncedAt"],
     }
+
+
+# --------------------------------------------------------------------------
+# Sound Connect — organisation indépendante (espaces / dossiers / projets / playlists)
+# --------------------------------------------------------------------------
+# PHONO (ci-dessus) n'est qu'une SOURCE de fichiers ("masters") parmi d'autres à venir
+# (ex. un futur dossier SharePoint "démos/maquettes"). Cette section gère une couche
+# d'organisation totalement indépendante de l'arborescence SharePoint : des "espaces"
+# (ex. label ARK / label Duchess), contenant des "dossiers" (ex. un artiste), pouvant
+# eux-mêmes contenir des "projets"/"playlists" (ex. un EP, une sélection) qui référencent
+# des titres. Un titre peut être lié à plusieurs projets/playlists à la fois (many-to-many).
+#
+# Stockage : pour l'instant un simple JSON (local + R2, même pattern que le cache
+# catalogue ci-dessus) plutôt qu'une vraie base — la base D1 Cloudflare "duchess-sound-
+# connect" a été créée et est prête, mais nécessite un token API Cloudflare en variable
+# d'env Render pour que CE backend (hébergé sur Render, pas sur Cloudflare) puisse la
+# lire/écrire. Migration triviale le jour où ce token est fourni : le schéma JSON
+# ci-dessous correspond exactement aux tables prévues (workspaces/folders/tracks/
+# folderTracks).
+ARK_ARTISTS = {
+    "BENDE", "BILLIE", "CLEMENT HERFORT", "DAYSY", "JULIEN ANDRIANA",
+    "LENNON", "NAUMAUR", "ROMAIN MIALDEA", "TW", "WAREND",
+}  # reste du roster (COBALT, HEROE, JOSEPH KAMEL, PIERRE GARNIER...) -> espace "DUCHESS"
+
+
+def _now_iso() -> str:
+    return datetime.datetime.utcnow().isoformat() + "Z"
+
+
+def _slugify(name: str) -> str:
+    norm = unicodedata.normalize("NFD", name or "").encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"-+", "-", re.sub(r"[^a-z0-9]+", "-", norm.lower())).strip("-")
+
+
+def _org_default() -> dict:
+    return {"workspaces": {}, "folders": {}, "tracks": {}, "folderTracks": {}}
+
+
+def _org_load() -> dict:
+    if SOUNDCONNECT_ORG_PATH.exists():
+        return json.loads(SOUNDCONNECT_ORG_PATH.read_text(encoding="utf-8"))
+    if R2_ENABLED:
+        try:
+            client = get_r2_client()
+            obj = client.get_object(Bucket=R2_BUCKET_NAME, Key="soundconnect/org.json")
+            data = json.loads(obj["Body"].read().decode("utf-8"))
+            SOUNDCONNECT_ORG_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            return data
+        except Exception:  # noqa: BLE001 — pas encore de sauvegarde, organisation vide
+            return _org_default()
+    return _org_default()
+
+
+def _org_save(data: dict):
+    SOUNDCONNECT_ORG_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    if R2_ENABLED:
+        try:
+            client = get_r2_client()
+            client.put_object(
+                Bucket=R2_BUCKET_NAME,
+                Key="soundconnect/org.json",
+                Body=json.dumps(data, ensure_ascii=False).encode("utf-8"),
+                ContentType="application/json",
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[R2] sauvegarde organisation Sound Connect échouée : {e}")
+
+
+def _org_workspace_for_artist(artist: str) -> str:
+    norm = unicodedata.normalize("NFD", artist or "").encode("ascii", "ignore").decode("ascii").upper().strip()
+    return "ARK" if norm in ARK_ARTISTS else "DUCHESS"
+
+
+def _org_ensure_workspace(data: dict, name: str) -> str:
+    for ws in data["workspaces"].values():
+        if ws["name"].lower() == name.lower():
+            return ws["id"]
+    wid = str(uuid.uuid4())
+    data["workspaces"][wid] = {"id": wid, "name": name, "slug": _slugify(name), "sortOrder": len(data["workspaces"]), "createdAt": _now_iso()}
+    return wid
+
+
+def _org_ensure_folder(data: dict, workspace_id: str, parent_id: Optional[str], name: str, kind: str) -> str:
+    for f in data["folders"].values():
+        if f["workspaceId"] == workspace_id and (f.get("parentId") or None) == (parent_id or None) and f["kind"] == kind and f["name"].lower() == name.lower():
+            return f["id"]
+    fid = str(uuid.uuid4())
+    data["folders"][fid] = {
+        "id": fid, "workspaceId": workspace_id, "parentId": parent_id, "name": name,
+        "kind": kind, "sortOrder": len(data["folders"]), "createdAt": _now_iso(),
+    }
+    data["folderTracks"].setdefault(fid, [])
+    return fid
+
+
+def _org_upsert_track(data: dict, raw: dict) -> str:
+    tid = f"phono:{raw['id']}"
+    data["tracks"][tid] = {
+        "id": tid,
+        "sourceKind": "phono_master",
+        "externalId": raw["id"],
+        "artist": raw["artist"],
+        "title": raw["title"],
+        "filename": raw["filename"],
+        "size": raw.get("size"),
+        "downloadUrl": raw.get("downloadUrl"),
+        "webUrl": raw.get("webUrl"),
+        "lastModified": raw.get("lastModified"),
+        "versionConfidence": raw.get("versionConfidence"),
+        "syncedAt": _now_iso(),
+    }
+    return tid
+
+
+def _org_link_track(data: dict, folder_id: str, track_id: str):
+    lst = data["folderTracks"].setdefault(folder_id, [])
+    if track_id not in lst:
+        lst.append(track_id)
+
+
+def _org_ingest(raw_tracks: list) -> dict:
+    """Classe automatiquement les NOUVEAUX titres PHONO : espace (ARK/DUCHESS selon le
+    roster) -> dossier artiste -> projet titre. Un titre déjà connu garde sa métadonnée
+    à jour (ex. downloadUrl, qui expire côté SharePoint) mais n'est jamais redéplacé —
+    si l'équipe l'a réorganisé ailleurs entretemps, ce choix est respecté."""
+    data = _org_load()
+    for raw in raw_tracks:
+        ws_id = _org_ensure_workspace(data, _org_workspace_for_artist(raw["artist"]))
+        artist_folder_id = _org_ensure_folder(data, ws_id, None, raw["artist"], "folder")
+        project_id = _org_ensure_folder(data, ws_id, artist_folder_id, raw["title"], "project")
+        track_id = _org_upsert_track(data, raw)
+        _org_link_track(data, project_id, track_id)
+    _org_save(data)
+    return data
+
+
+def _org_folder_summary(data: dict, f: dict) -> dict:
+    children = [c for c in data["folders"].values() if c.get("parentId") == f["id"]]
+    track_ids = data["folderTracks"].get(f["id"], [])
+    if children:
+        preview = [c["name"] for c in sorted(children, key=lambda c: c["name"].lower())[:4]]
+    else:
+        preview = [data["tracks"][tid]["title"] for tid in track_ids[:4] if tid in data["tracks"]]
+    return {
+        "id": f["id"], "name": f["name"], "kind": f["kind"], "parentId": f.get("parentId"),
+        "workspaceId": f["workspaceId"], "childCount": len(children), "trackCount": len(track_ids),
+        "preview": preview,
+    }
+
+
+@app.get("/soundconnect/workspaces")
+def soundconnect_list_workspaces():
+    data = _org_load()
+    out = []
+    for ws in sorted(data["workspaces"].values(), key=lambda w: w.get("sortOrder", 0)):
+        top_folders = [f for f in data["folders"].values() if f["workspaceId"] == ws["id"] and f.get("parentId") is None]
+        preview = [f["name"] for f in sorted(top_folders, key=lambda f: f["name"].lower())[:4]]
+        out.append({**ws, "folderCount": len(top_folders), "preview": preview})
+    return {"workspaces": out}
+
+
+class SCWorkspaceBody(BaseModel):
+    name: str
+
+
+@app.post("/soundconnect/workspaces")
+def soundconnect_create_workspace(body: SCWorkspaceBody):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nom d'espace requis.")
+    data = _org_load()
+    wid = _org_ensure_workspace(data, name)
+    _org_save(data)
+    return data["workspaces"][wid]
+
+
+@app.get("/soundconnect/workspaces/{workspace_id}/folders")
+def soundconnect_workspace_folders(workspace_id: str, parentId: Optional[str] = None):
+    data = _org_load()
+    ws = data["workspaces"].get(workspace_id)
+    if not ws:
+        raise HTTPException(status_code=404, detail="Espace introuvable.")
+    items = [
+        _org_folder_summary(data, f) for f in data["folders"].values()
+        if f["workspaceId"] == workspace_id and (f.get("parentId") or None) == (parentId or None)
+    ]
+    items.sort(key=lambda x: x["name"].lower())
+    return {"workspace": ws, "folders": items}
+
+
+class SCFolderBody(BaseModel):
+    workspaceId: str
+    name: str
+    kind: str = "folder"  # 'folder' | 'project' | 'playlist'
+    parentId: Optional[str] = None
+
+
+@app.post("/soundconnect/folders")
+def soundconnect_create_folder(body: SCFolderBody):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nom requis.")
+    data = _org_load()
+    if body.workspaceId not in data["workspaces"]:
+        raise HTTPException(status_code=404, detail="Espace introuvable.")
+    fid = _org_ensure_folder(data, body.workspaceId, body.parentId, name, body.kind)
+    _org_save(data)
+    return data["folders"][fid]
+
+
+@app.get("/soundconnect/folders/{folder_id}")
+def soundconnect_folder_detail(folder_id: str):
+    data = _org_load()
+    f = data["folders"].get(folder_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Dossier introuvable.")
+    children = sorted(
+        (_org_folder_summary(data, c) for c in data["folders"].values() if c.get("parentId") == folder_id),
+        key=lambda x: x["name"].lower(),
+    )
+    track_ids = data["folderTracks"].get(folder_id, [])
+    tracks = [data["tracks"][tid] for tid in track_ids if tid in data["tracks"]]
+    return {"folder": f, "children": children, "tracks": tracks}
+
+
+class SCFolderUpdateBody(BaseModel):
+    name: Optional[str] = None
+    parentId: Optional[str] = None
+
+
+@app.put("/soundconnect/folders/{folder_id}")
+def soundconnect_update_folder(folder_id: str, body: SCFolderUpdateBody):
+    data = _org_load()
+    f = data["folders"].get(folder_id)
+    if not f:
+        raise HTTPException(status_code=404, detail="Dossier introuvable.")
+    if body.name is not None and body.name.strip():
+        f["name"] = body.name.strip()
+    if body.parentId is not None:
+        f["parentId"] = body.parentId or None
+    _org_save(data)
+    return f
+
+
+@app.delete("/soundconnect/folders/{folder_id}")
+def soundconnect_delete_folder(folder_id: str):
+    data = _org_load()
+    if folder_id not in data["folders"]:
+        raise HTTPException(status_code=404, detail="Dossier introuvable.")
+    to_delete = {folder_id}
+    changed = True
+    while changed:
+        changed = False
+        for f in data["folders"].values():
+            if f.get("parentId") in to_delete and f["id"] not in to_delete:
+                to_delete.add(f["id"])
+                changed = True
+    for fid in to_delete:
+        data["folders"].pop(fid, None)
+        data["folderTracks"].pop(fid, None)
+    _org_save(data)
+    return {"deleted": True, "ids": list(to_delete)}
+
+
+class SCAddTrackBody(BaseModel):
+    trackId: str
+
+
+@app.post("/soundconnect/folders/{folder_id}/tracks")
+def soundconnect_add_track_to_folder(folder_id: str, body: SCAddTrackBody):
+    data = _org_load()
+    if folder_id not in data["folders"]:
+        raise HTTPException(status_code=404, detail="Dossier introuvable.")
+    if body.trackId not in data["tracks"]:
+        raise HTTPException(status_code=404, detail="Titre introuvable.")
+    _org_link_track(data, folder_id, body.trackId)
+    _org_save(data)
+    return {"added": True}
+
+
+@app.delete("/soundconnect/folders/{folder_id}/tracks/{track_id}")
+def soundconnect_remove_track_from_folder(folder_id: str, track_id: str):
+    data = _org_load()
+    lst = data["folderTracks"].get(folder_id, [])
+    if track_id in lst:
+        lst.remove(track_id)
+        _org_save(data)
+    return {"removed": True}
+
+
+@app.get("/soundconnect/tracks")
+def soundconnect_search_tracks(q: str = ""):
+    data = _org_load()
+    tracks = list(data["tracks"].values())
+    if q:
+        ql = q.lower()
+        tracks = [t for t in tracks if ql in t["artist"].lower() or ql in t["title"].lower()]
+    tracks.sort(key=lambda t: (t["artist"].lower(), t["title"].lower()))
+    return {"tracks": tracks}

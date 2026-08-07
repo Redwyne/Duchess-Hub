@@ -218,7 +218,7 @@ tr.admin-row-selected td { background: var(--accent-soft) !important; }
 }
 .admin-table td { padding: 10px 14px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; white-space: nowrap; }
 .admin-table tr:last-child td { border-bottom: none; }
-.admin-table tr:hover td { background: rgba(255,255,255,.02); }
+.admin-table tr:hover td { background: var(--row-hover); }
 .admin-table tr.admin-row-clickable { cursor: pointer; }
 .admin-table tr.admin-row-clickable:hover td { background: var(--accent-soft); }
 
