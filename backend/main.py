@@ -2168,7 +2168,7 @@ def _org_ensure_workspace(data: dict, name: str) -> str:
     return wid
 
 
-def _org_ensure_folder(data: dict, workspace_id: str, parent_id: Optional[str], name: str, kind: str) -> str:
+def _org_ensure_folder(data: dict, workspace_id: str, parent_id: Optional[str], name: str, kind: str, project_type: Optional[str] = None) -> str:
     for f in data["folders"].values():
         if f["workspaceId"] == workspace_id and (f.get("parentId") or None) == (parent_id or None) and f["kind"] == kind and f["name"].lower() == name.lower():
             return f["id"]
@@ -2176,6 +2176,9 @@ def _org_ensure_folder(data: dict, workspace_id: str, parent_id: Optional[str], 
     data["folders"][fid] = {
         "id": fid, "workspaceId": workspace_id, "parentId": parent_id, "name": name,
         "kind": kind, "sortOrder": len(data["folders"]), "createdAt": _now_iso(),
+        # Uniquement pour kind="project" : "single" | "ep" | "album" — pure métadonnée
+        # d'affichage (badge sur la tuile), aucune logique différente selon la valeur.
+        "projectType": project_type,
     }
     data["folderTracks"].setdefault(fid, [])
     return fid
@@ -2281,7 +2284,7 @@ def _org_folder_summary(data: dict, f: dict) -> dict:
     return {
         "id": f["id"], "name": f["name"], "kind": f["kind"], "parentId": f.get("parentId"),
         "workspaceId": f["workspaceId"], "childCount": len(children), "trackCount": len(track_ids),
-        "preview": preview,
+        "preview": preview, "projectType": f.get("projectType"),
     }
 
 
@@ -2330,6 +2333,7 @@ class SCFolderBody(BaseModel):
     name: str
     kind: str = "folder"  # 'folder' | 'project' | 'playlist'
     parentId: Optional[str] = None
+    projectType: Optional[str] = None  # 'single' | 'ep' | 'album' — pour kind="project" seulement
 
 
 @app.post("/soundconnect/folders")
@@ -2340,7 +2344,7 @@ def soundconnect_create_folder(body: SCFolderBody):
     data = _org_load()
     if body.workspaceId not in data["workspaces"]:
         raise HTTPException(status_code=404, detail="Espace introuvable.")
-    fid = _org_ensure_folder(data, body.workspaceId, body.parentId, name, body.kind)
+    fid = _org_ensure_folder(data, body.workspaceId, body.parentId, name, body.kind, body.projectType)
     _org_save(data)
     return data["folders"][fid]
 
@@ -2449,7 +2453,7 @@ def soundconnect_list_all_folders(kind: Optional[str] = None):
         out.append({
             "id": f["id"], "name": f["name"], "kind": f["kind"], "parentId": f.get("parentId"),
             "workspaceId": f["workspaceId"], "workspaceName": ws["name"] if ws else "",
-            "parentName": parent["name"] if parent else None,
+            "parentName": parent["name"] if parent else None, "projectType": f.get("projectType"),
         })
     out.sort(key=lambda x: (x["workspaceName"].lower(), (x["parentName"] or "").lower(), x["name"].lower()))
     return {"folders": out}

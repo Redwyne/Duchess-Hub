@@ -64,6 +64,9 @@
   const newModalName = document.getElementById("sc-newModalName");
   const newModalConfirm = document.getElementById("sc-newModalConfirm");
 
+  const projectTypeModal = document.getElementById("sc-projectTypeModal");
+  const projectTypeModalClose = document.getElementById("sc-projectTypeModalClose");
+
   const pickerModal = document.getElementById("sc-pickerModal");
   const pickerModalTitle = document.getElementById("sc-pickerModalTitle");
   const pickerModalClose = document.getElementById("sc-pickerModalClose");
@@ -691,14 +694,16 @@
 
   function renderTileGrid(folders, { onTileClick }) {
     if (!folders.length) {
-      contentEl.innerHTML = emptyStateHtml("Rien ici pour l'instant.", "Utilise les boutons en haut à droite pour créer un dossier ou une playlist.");
+      contentEl.innerHTML = emptyStateHtml("Rien ici pour l'instant.", "Utilise les boutons en haut à droite pour créer un dossier ou un projet.");
       return;
     }
-    contentEl.innerHTML = `<div class="sc-tile-grid">${folders.map((f) => tileHtml({
-      id: f.id, name: f.name, kind: f.kind, coverKind: "folder",
-      meta: f.childCount ? `${f.childCount} élément${f.childCount > 1 ? "s" : ""}` : `${f.trackCount} titre${f.trackCount > 1 ? "s" : ""}`,
-      showPlay: f.trackCount > 0 && f.childCount === 0,
-    })).join("")}</div>`;
+    contentEl.innerHTML = `<div class="sc-tile-grid">${folders.map((f) => {
+      const typeLabel = f.projectType && PROJECT_TYPE_LABELS[f.projectType] ? PROJECT_TYPE_LABELS[f.projectType] + " · " : "";
+      const meta = f.childCount
+        ? `${f.childCount} élément${f.childCount > 1 ? "s" : ""}`
+        : `${typeLabel}${f.trackCount} titre${f.trackCount > 1 ? "s" : ""}`;
+      return tileHtml({ id: f.id, name: f.name, kind: f.kind, coverKind: "folder", meta, showPlay: f.trackCount > 0 && f.childCount === 0 });
+    }).join("")}</div>`;
     contentEl.querySelectorAll(".sc-tile").forEach((el) => {
       el.addEventListener("click", (e) => {
         if (e.target.closest(".sc-tile-play") || e.target.closest(".sc-cover-edit-btn")) return;
@@ -785,10 +790,10 @@
     renderBreadcrumb();
     setTopbarActions(`
       <button type="button" class="sc-btn" id="sc-newFolderTop">+ Nouveau dossier</button>
-      <button type="button" class="sc-btn" id="sc-newPlaylistTop">+ Nouvelle playlist</button>
+      <button type="button" class="sc-btn" id="sc-newPlaylistTop">+ Nouveau projet</button>
     `);
     document.getElementById("sc-newFolderTop").addEventListener("click", () => openNewModal("folder", { workspaceId: id, parentId: null, title: "Nouveau dossier" }));
-    document.getElementById("sc-newPlaylistTop").addEventListener("click", () => openNewModal("playlist", { workspaceId: id, parentId: null, title: "Nouvelle playlist" }));
+    document.getElementById("sc-newPlaylistTop").addEventListener("click", () => openProjectTypeModal({ workspaceId: id, parentId: null }));
     try {
       const res = await fetchJSON(`/soundconnect/workspaces/${id}/folders`);
       renderTileGrid(res.folders, { onTileClick: (fid, fname) => showFolder(fid, fname, breadcrumbStack) });
@@ -812,11 +817,11 @@
     if (detail.children.length > 0) {
       setTopbarActions(`
         <button type="button" class="sc-btn" id="sc-newFolderTop">+ Nouveau dossier</button>
-        <button type="button" class="sc-btn" id="sc-newPlaylistTop">+ Nouvelle playlist</button>
+        <button type="button" class="sc-btn" id="sc-newPlaylistTop">+ Nouveau projet</button>
         <button type="button" class="sc-btn" id="sc-deleteFolderTop" title="Supprimer ce dossier">🗑</button>
       `);
       document.getElementById("sc-newFolderTop").addEventListener("click", () => openNewModal("folder", { workspaceId, parentId: id, title: "Nouveau dossier" }));
-      document.getElementById("sc-newPlaylistTop").addEventListener("click", () => openNewModal("playlist", { workspaceId, parentId: id, title: "Nouvelle playlist" }));
+      document.getElementById("sc-newPlaylistTop").addEventListener("click", () => openProjectTypeModal({ workspaceId, parentId: id }));
       document.getElementById("sc-deleteFolderTop").addEventListener("click", () => deleteFolder(id, parentBreadcrumb));
       renderTileGrid(detail.children, { onTileClick: (fid, fname) => showFolder(fid, fname, breadcrumbStack) });
     } else {
@@ -830,6 +835,12 @@
     }
   }
 
+  function folderKindLabel(f) {
+    if (f.kind === "playlist") return "Playlist";
+    if (f.projectType && PROJECT_TYPE_LABELS[f.projectType]) return PROJECT_TYPE_LABELS[f.projectType];
+    return "Projet";
+  }
+
   function renderProjectDetail(detail) {
     const f = detail.folder;
     const tracks = detail.tracks;
@@ -838,7 +849,7 @@
         <div class="sc-detail-cover">${coverBlockHtml("folder", f.id)}</div>
         <div class="sc-detail-info">
           <h2>${escapeHtml(f.name)}</h2>
-          <div class="sc-detail-meta">${f.kind === "playlist" ? "Playlist" : "Projet"} · ${tracks.length} titre${tracks.length > 1 ? "s" : ""}</div>
+          <div class="sc-detail-meta">${folderKindLabel(f)} · ${tracks.length} titre${tracks.length > 1 ? "s" : ""}</div>
         </div>
       </div>
       <button type="button" class="sc-add-tracks-btn" id="sc-addTracksBtn">+ Ajouter des titres</button>
@@ -951,6 +962,8 @@
   // Création / renommage / suppression de dossiers
   // ---------------------------------------------------------------------
 
+  const PROJECT_TYPE_LABELS = { single: "Single", ep: "EP", album: "Album" };
+
   function openNewModal(mode, ctx) {
     newModalMode = mode;
     newModalCtx = ctx;
@@ -964,6 +977,29 @@
   newModalClose.addEventListener("click", closeNewModal);
   newModal.addEventListener("click", (e) => { if (e.target === newModal) closeNewModal(); });
 
+  // "+ Nouveau projet" : étape 1 (choisir Single / EP / Album) avant de nommer.
+  // Le type n'est qu'une métadonnée d'affichage — même dossier "carré" ensuite,
+  // dans lequel on peut mettre des titres comme n'importe quel autre projet.
+  let pendingProjectCtx = null;
+  function openProjectTypeModal(ctx) {
+    pendingProjectCtx = ctx;
+    projectTypeModal.classList.remove("hidden");
+  }
+  function closeProjectTypeModal() { projectTypeModal.classList.add("hidden"); pendingProjectCtx = null; }
+  projectTypeModalClose.addEventListener("click", closeProjectTypeModal);
+  projectTypeModal.addEventListener("click", (e) => { if (e.target === projectTypeModal) closeProjectTypeModal(); });
+  projectTypeModal.querySelectorAll("[data-project-type]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const type = btn.dataset.projectType;
+      const ctx = pendingProjectCtx || {};
+      closeProjectTypeModal();
+      openNewModal("project", {
+        workspaceId: ctx.workspaceId, parentId: ctx.parentId, projectType: type,
+        title: `Nouveau projet — ${PROJECT_TYPE_LABELS[type]}`, prefill: PROJECT_TYPE_LABELS[type],
+      });
+    });
+  });
+
   newModalConfirm.addEventListener("click", async () => {
     const name = newModalName.value.trim();
     if (!name) return;
@@ -974,10 +1010,13 @@
         closeNewModal();
         await loadSidebar();
         showHome();
-      } else if (newModalMode === "folder" || newModalMode === "playlist") {
+      } else if (newModalMode === "folder" || newModalMode === "project") {
         await fetchJSON("/soundconnect/folders", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ workspaceId: newModalCtx.workspaceId, parentId: newModalCtx.parentId, name, kind: newModalMode }),
+          body: JSON.stringify({
+            workspaceId: newModalCtx.workspaceId, parentId: newModalCtx.parentId, name,
+            kind: newModalMode, projectType: newModalMode === "project" ? newModalCtx.projectType : null,
+          }),
         });
         closeNewModal();
         if (newModalCtx.parentId) {

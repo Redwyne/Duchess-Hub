@@ -193,6 +193,23 @@
 .sc-btn-primary:disabled { opacity: .6; cursor: wait; transform: none; }
 .sc-btn-sm { padding: 8px 12px; font-size: 12px; width: 100%; text-align: center; }
 
+/* Choix du type de projet (Single / EP / Album) — étape 1 de "+ Nouveau projet" */
+.sc-project-type-choices { display: flex; flex-direction: column; gap: 8px; }
+.sc-project-type-btn {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color .15s ease, transform .15s ease;
+}
+.sc-project-type-btn:hover { border-color: var(--accent); transform: translateY(-1px); }
+
 /* ---------------- Contenu principal ---------------- */
 
 .sc-main { flex: 1; min-width: 0; padding-left: 30px; }

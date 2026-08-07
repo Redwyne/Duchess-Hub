@@ -871,7 +871,7 @@
   </div>
 </div>
 
-<!-- Modale : nouvel espace / dossier / playlist -->
+<!-- Modale : nouvel espace / dossier / projet -->
 <div class="sc-modal-overlay hidden" id="sc-newModal">
   <div class="sc-modal sc-modal-sm">
     <div class="sc-modal-head">
@@ -880,6 +880,21 @@
     </div>
     <input type="text" id="sc-newModalName" placeholder="Nom…" />
     <button type="button" class="sc-btn sc-btn-primary" id="sc-newModalConfirm">Créer</button>
+  </div>
+</div>
+
+<!-- Modale : choix du type de projet (Single / EP / Album) — étape 1 avant de nommer -->
+<div class="sc-modal-overlay hidden" id="sc-projectTypeModal">
+  <div class="sc-modal sc-modal-sm">
+    <div class="sc-modal-head">
+      <h3>Nouveau projet</h3>
+      <button type="button" class="sc-modal-close" id="sc-projectTypeModalClose">✕</button>
+    </div>
+    <div class="sc-project-type-choices">
+      <button type="button" class="sc-project-type-btn" data-project-type="single">Single</button>
+      <button type="button" class="sc-project-type-btn" data-project-type="ep">EP</button>
+      <button type="button" class="sc-project-type-btn" data-project-type="album">Album</button>
+    </div>
   </div>
 </div>
 
