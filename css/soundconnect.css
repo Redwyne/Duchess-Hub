@@ -309,7 +309,7 @@
 .sc-track-list { display: flex; flex-direction: column; gap: 1px; }
 .sc-track-item {
   display: grid;
-  grid-template-columns: 16px 26px 34px 1fr auto auto 28px;
+  grid-template-columns: 16px 26px 34px 1fr 28px 28px 28px 28px;
   align-items: center;
   gap: 14px;
   padding: 9px 10px;
@@ -380,9 +380,19 @@
 .sc-track-name { font-size: 13.5px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 7px; }
 .sc-track-item.playing .sc-track-name { color: var(--accent-2); }
 .sc-track-sub { font-size: 11.5px; color: var(--muted-2); }
-.sc-track-meta { font-size: 12px; color: var(--muted-2); white-space: nowrap; }
-.sc-track-menu { width: 26px; height: 26px; border: none; background: none; color: var(--muted-2); cursor: pointer; border-radius: 6px; font-size: 13px; }
-.sc-track-menu:hover { background: var(--sunken); color: var(--text); }
+
+/* Icônes d'action (téléchargement / partage / infos / plus d'options) — visibles
+   seulement au survol pour garder la liste épurée, comme la poignée de
+   réordonnancement. Partage et infos n'ont pas encore d'action derrière. */
+.sc-track-action {
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border: none; background: none;
+  color: var(--muted-2); cursor: pointer; border-radius: 6px;
+  opacity: 0; transition: opacity .12s ease, background .12s ease, color .12s ease;
+}
+.sc-track-action svg { width: 15px; height: 15px; }
+.sc-track-item:hover .sc-track-action { opacity: 1; }
+.sc-track-action:hover { background: var(--sunken); color: var(--text); }
 
 .sc-badge {
   font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;

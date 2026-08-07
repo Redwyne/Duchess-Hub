@@ -605,6 +605,14 @@
     window.open(`${BACKEND_BASE_URL}/soundconnect/tracks/${encodeURIComponent(t.id)}/download`, "_blank");
   }
 
+  async function removeTrackFromFolder(t, folderId) {
+    try {
+      await fetchJSON(`/soundconnect/folders/${folderId}/tracks/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+      invalidateFolderCache();
+      refreshCurrentView();
+    } catch (err) {}
+  }
+
   function triggerNewVersionUpload(t) {
     const input = document.createElement("input");
     input.type = "file";
@@ -1023,6 +1031,30 @@
     <circle cx="2.5" cy="13.5" r="1.4"></circle><circle cx="7.5" cy="13.5" r="1.4"></circle>
   </svg>`;
 
+  // Icônes d'action de la liste de titres (téléchargement / partage / infos /
+  // plus d'options) — remplacent l'ancien lien SharePoint (↗) et la taille en
+  // Mo, jugés peu utiles à l'affichage par Michel. Partage et infos sont des
+  // emplacements réservés pour l'instant (pas encore de fonctionnalité derrière).
+  const TRACK_ICON_DOWNLOAD = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
+  const TRACK_ICON_SHARE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>`;
+  const TRACK_ICON_INFO = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
+  const TRACK_ICON_MORE = `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle cx="19" cy="12" r="2"></circle></svg>`;
+
+  // Liste d'actions partagée entre le clic droit ET le bouton "..." de chaque
+  // ligne — une seule source de vérité pour ne jamais désynchroniser les deux.
+  function trackMenuItems(t, { removable, folderId }) {
+    const items = [{ label: "Ajouter au projet…", onClick: () => openPickerForAddTrack(t) }];
+    if (removable && folderId) items.push({ label: "Déplacer vers…", onClick: () => openPickerForMoveTrack(t, folderId) });
+    items.push({ sep: true });
+    items.push({ label: "Télécharger (WAV)", onClick: () => downloadTrack(t) });
+    items.push({ label: "Nouvelle version…", onClick: () => triggerNewVersionUpload(t) });
+    if (removable && folderId) {
+      items.push({ sep: true });
+      items.push({ label: "Retirer de ce projet", onClick: () => removeTrackFromFolder(t, folderId) });
+    }
+    return items;
+  }
+
   // Réordonnancement des titres d'un projet, par glisser-déposer à partir de la
   // poignée à 6 points — l'ordre vit dans folderTracks côté backend (aucune
   // incidence sur PHONO). Optimiste côté UI : on réordonne localement tout de
@@ -1059,14 +1091,23 @@
           <div class="sc-track-name">${escapeHtml(t.title)} ${badgeFor(t)}</div>
           <div class="sc-track-sub">${escapeHtml(t.artist)}</div>
         </div>
-        <div class="sc-track-meta">${formatSize(t.size)}</div>
-        <a class="sc-track-link" href="${t.webUrl || "#"}" target="_blank" rel="noopener" title="Ouvrir dans SharePoint" style="color:var(--muted-2);text-decoration:none;">↗</a>
-        ${removable ? `<button type="button" class="sc-track-menu" data-remove-idx="${i}" title="Retirer">✕</button>` : "<span></span>"}
+        <button type="button" class="sc-track-action sc-track-action-download" data-idx="${i}" title="Télécharger" aria-label="Télécharger">${TRACK_ICON_DOWNLOAD}</button>
+        <button type="button" class="sc-track-action sc-track-action-share" title="Partager" aria-label="Partager">${TRACK_ICON_SHARE}</button>
+        <button type="button" class="sc-track-action sc-track-action-info" title="Infos du titre" aria-label="Infos du titre">${TRACK_ICON_INFO}</button>
+        <button type="button" class="sc-track-action sc-track-action-more" data-idx="${i}" title="Plus d'options" aria-label="Plus d'options">${TRACK_ICON_MORE}</button>
       </div>
     `).join("");
-    container.querySelectorAll(".sc-track-playbtn, .sc-track-item").forEach((el) => {
+    // Un seul listener, posé sur la LIGNE (pas aussi sur .sc-track-playbtn) :
+    // le bouton est un descendant de la ligne, un clic dessus déclenche déjà le
+    // listener de la ligne par bubbling. Les deux étaient posés avant, ce qui
+    // exécutait ce code DEUX FOIS pour un même clic sur le bouton (une fois
+    // pour le bouton, une fois pour la ligne) — la 1re lançait la lecture, la
+    // 2e la retrouvait "déjà en cours" et la remettait aussitôt en pause via
+    // togglePlayPause(), d'où le titre qui ne démarrait qu'après un appui sur
+    // espace juste après.
+    container.querySelectorAll(".sc-track-item").forEach((el) => {
       el.addEventListener("click", (e) => {
-        if (e.target.closest(".sc-track-link") || e.target.closest(".sc-track-menu") || e.target.closest(".sc-cover-edit-btn") || e.target.closest(".sc-track-drag-handle")) return;
+        if (e.target.closest(".sc-track-action") || e.target.closest(".sc-cover-edit-btn") || e.target.closest(".sc-track-drag-handle")) return;
         const item = e.currentTarget.closest(".sc-track-item") || e.currentTarget;
         const idx = [...container.querySelectorAll(".sc-track-item")].indexOf(item);
         if (idx < 0) return;
@@ -1080,19 +1121,25 @@
         else playQueue(tracks, idx);
       });
     });
-    if (removable) {
-      container.querySelectorAll("[data-remove-idx]").forEach((btn) => {
-        btn.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          const t = tracks[+btn.dataset.removeIdx];
-          try {
-            await fetchJSON(`/soundconnect/folders/${folderId}/tracks/${encodeURIComponent(t.id)}`, { method: "DELETE" });
-            invalidateFolderCache();
-            refreshCurrentView();
-          } catch (err) {}
-        });
+    // Icônes d'action à droite de chaque ligne : téléchargement direct, deux
+    // emplacements réservés (partage / infos du titre — pas encore branchés,
+    // demandés par Michel pour plus tard), et "..." qui ouvre le même menu que
+    // le clic droit (voir trackMenuItems ci-dessous, partagé entre les deux
+    // pour ne jamais avoir deux listes d'actions différentes selon l'entrée).
+    container.querySelectorAll(".sc-track-action-download").forEach((btn) => {
+      btn.addEventListener("click", (e) => { e.stopPropagation(); downloadTrack(tracks[+btn.dataset.idx]); });
+    });
+    container.querySelectorAll(".sc-track-action-share, .sc-track-action-info").forEach((btn) => {
+      btn.addEventListener("click", (e) => { e.stopPropagation(); }); // pas encore implémenté
+    });
+    container.querySelectorAll(".sc-track-action-more").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const t = tracks[+btn.dataset.idx];
+        const rect = btn.getBoundingClientRect();
+        showContextMenu(rect.right, rect.bottom + 4, trackMenuItems(t, { removable, folderId }));
       });
-    }
+    });
     // Drag and drop : un titre se glisse dans un projet/playlist de l'arbre sidebar
     // (ajout, jamais retrait automatique de la vue courante). Clic droit = mêmes
     // actions accessibles sans glisser-déposer, plus téléchargement et nouvelle version.
@@ -1101,12 +1148,7 @@
       attachDragSource(el, { type: "track", id: t.id });
       el.addEventListener("contextmenu", (e) => {
         e.preventDefault();
-        const items = [{ label: "Ajouter au projet…", onClick: () => openPickerForAddTrack(t) }];
-        if (removable && folderId) items.push({ label: "Déplacer vers…", onClick: () => openPickerForMoveTrack(t, folderId) });
-        items.push({ sep: true });
-        items.push({ label: "Télécharger (WAV)", onClick: () => downloadTrack(t) });
-        items.push({ label: "Nouvelle version…", onClick: () => triggerNewVersionUpload(t) });
-        showContextMenu(e.clientX, e.clientY, items);
+        showContextMenu(e.clientX, e.clientY, trackMenuItems(t, { removable, folderId }));
       });
     });
 
@@ -1429,24 +1471,88 @@
     }
   }
 
+  // Résolution FIXE utilisée pour l'analyse et le cache — indépendante de la
+  // largeur d'écran (qui ne sert qu'à choisir combien de barres AFFICHER, via
+  // resamplePeaks juste en dessous). Une silhouette calculée une fois reste
+  // valable pour tout le monde, quelle que soit la taille de sa fenêtre.
+  const WAVEFORM_CACHE_RESOLUTION = 240;
+
+  // Rééchantillonne un tableau de pics vers un nombre cible de barres, par
+  // plus proche voisin — largement suffisant pour une silhouette visuelle,
+  // pas besoin d'interpolation fine.
+  function resamplePeaks(peaks, targetCount) {
+    if (!peaks.length || targetCount === peaks.length) return peaks;
+    const out = new Array(targetCount);
+    for (let i = 0; i < targetCount; i++) {
+      out[i] = peaks[Math.min(peaks.length - 1, Math.floor((i * peaks.length) / targetCount))];
+    }
+    return out;
+  }
+
+  // Cache mémoire (dure tant que l'onglet reste ouvert) par-dessus le cache
+  // serveur persistant (voir /soundconnect/tracks/{id}/waveform, backend/main.py)
+  // — demande de Michel après avoir remarqué que la silhouette "réinitialisait"
+  // sa forme quelques secondes après le début de la lecture (le temps que le
+  // fetch + décodage du fichier entier se termine) : plutôt que de refaire ce
+  // calcul coûteux à CHAQUE lecture, on l'analyse une seule fois puis on la
+  // garde — pour cette session immédiatement, et pour toutes les prochaines
+  // lectures (par n'importe qui) une fois sauvegardée côté serveur.
+  const waveformMemoryCache = new Map();
+
+  async function fetchCachedWaveform(trackId) {
+    if (waveformMemoryCache.has(trackId)) return waveformMemoryCache.get(trackId);
+    try {
+      const res = await fetchJSON(`/soundconnect/tracks/${encodeURIComponent(trackId)}/waveform`);
+      if (res && Array.isArray(res.peaks) && res.peaks.length) {
+        waveformMemoryCache.set(trackId, res.peaks);
+        return res.peaks;
+      }
+    } catch (e) {} // pas encore analysé (404) ou backend indisponible — silhouette générée le temps de l'analyser
+    return null;
+  }
+
+  function saveWaveformToCache(trackId, peaks) {
+    waveformMemoryCache.set(trackId, peaks);
+    // Best-effort : si la sauvegarde échoue, seule cette session garde le
+    // bénéfice du cache (perdu au rechargement) — jamais bloquant pour la lecture.
+    fetchJSON(`/soundconnect/tracks/${encodeURIComponent(trackId)}/waveform`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ peaks }),
+    }).catch(() => {});
+  }
+
   let waveformToken = 0;
   function renderWaveform(track) {
     const myToken = ++waveformToken;
     const BAR_PITCH = 3; // largeur + espace visés par barre — barres calées exactement sur la largeur réelle du conteneur, jamais de vide résiduel sur le côté.
     const count = Math.max(30, Math.floor((waveformEl.clientWidth || 480) / BAR_PITCH));
-    const fake = generateFakePeaks(String(track.id || track.title || "x"), count);
-    waveformBgEl.innerHTML = barsMarkup(fake);
-    waveformFgEl.innerHTML = barsMarkup(fake);
+
+    function paint(peaks) {
+      const html = barsMarkup(resamplePeaks(peaks, count));
+      waveformBgEl.innerHTML = html;
+      waveformFgEl.innerHTML = html;
+    }
+
     waveformEl.style.setProperty("--progress", "0%");
-    if (!track.downloadUrl) return;
-    computeRealPeaks(track.downloadUrl, count)
-      .then((peaks) => {
-        if (!peaks || myToken !== waveformToken) return; // piste changée entretemps, on ignore le résultat
-        const html = barsMarkup(peaks);
-        waveformBgEl.innerHTML = html;
-        waveformFgEl.innerHTML = html;
-      })
-      .catch(() => {}); // échec d'analyse (CORS, format...) : silhouette générée conservée telle quelle
+
+    const cached = waveformMemoryCache.get(track.id);
+    if (cached) { paint(cached); return; } // déjà connue : correcte dès la 1re image, jamais de "reset" visible
+
+    // Silhouette générée immédiatement, le temps de vérifier le cache serveur
+    // ou (à défaut) d'analyser le fichier — filet de sécurité, jamais un blanc.
+    paint(generateFakePeaks(String(track.id || track.title || "x"), WAVEFORM_CACHE_RESOLUTION));
+
+    fetchCachedWaveform(track.id).then((cachedPeaks) => {
+      if (myToken !== waveformToken) return; // piste changée entretemps, on ignore le résultat
+      if (cachedPeaks) { paint(cachedPeaks); return; } // déjà calculée avant (par cette session ou une autre)
+      if (!track.downloadUrl) return;
+      computeRealPeaks(track.downloadUrl, WAVEFORM_CACHE_RESOLUTION)
+        .then((peaks) => {
+          if (!peaks || myToken !== waveformToken) return;
+          paint(peaks);
+          saveWaveformToCache(track.id, peaks);
+        })
+        .catch(() => {}); // échec d'analyse (CORS, format...) : silhouette générée conservée telle quelle
+    });
   }
 
   // Icône + piste remplie : synchronise l'affichage sur audioEl.volume (source

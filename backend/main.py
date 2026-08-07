@@ -2533,6 +2533,70 @@ def soundconnect_track_download(track_id: str):
     return RedirectResponse(fresh_url)
 
 
+# --------------------------------------------------------------------------
+# Silhouette de waveform (analyse RMS) — calculée une fois côté navigateur
+# (Web Audio API, voir js/soundconnect.js:computeRealPeaks) puis mise en cache
+# ICI pour que PERSONNE n'ait plus jamais à retélécharger/redécoder le fichier
+# entier juste pour l'afficher : demande de Michel après avoir remarqué que la
+# silhouette "réinitialisait" sa forme après quelques secondes à chaque lecture
+# (le temps que le fetch+decode se termine) — même chose vue par un autre
+# auditeur, ou au rechargement de la page. Un point fixe de résolution (voir
+# WAVEFORM_CACHE_RESOLUTION côté JS) est stocké une fois pour toutes ; le
+# nombre de barres affichées (qui dépend de la largeur d'écran) est rééchantillonné
+# à l'affichage à partir de ce point fixe, jamais recalculé depuis l'audio.
+SOUNDCONNECT_WAVEFORMS_PATH = DATA_DIR / "soundconnect_waveforms.json"
+
+
+def _waveforms_load() -> dict:
+    if SOUNDCONNECT_WAVEFORMS_PATH.exists():
+        return json.loads(SOUNDCONNECT_WAVEFORMS_PATH.read_text(encoding="utf-8"))
+    if R2_ENABLED:
+        try:
+            client = get_r2_client()
+            obj = client.get_object(Bucket=R2_BUCKET_NAME, Key="soundconnect/waveforms.json")
+            data = json.loads(obj["Body"].read().decode("utf-8"))
+            SOUNDCONNECT_WAVEFORMS_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            return data
+        except Exception:  # noqa: BLE001 — pas encore de cache, on repart de zéro
+            return {}
+    return {}
+
+
+def _waveforms_save(data: dict):
+    SOUNDCONNECT_WAVEFORMS_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    if R2_ENABLED:
+        try:
+            client = get_r2_client()
+            client.put_object(
+                Bucket=R2_BUCKET_NAME,
+                Key="soundconnect/waveforms.json",
+                Body=json.dumps(data, ensure_ascii=False).encode("utf-8"),
+                ContentType="application/json",
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[R2] sauvegarde waveforms Sound Connect échouée : {e}")
+
+
+@app.get("/soundconnect/tracks/{track_id}/waveform")
+def soundconnect_get_waveform(track_id: str):
+    entry = _waveforms_load().get(track_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Pas encore analysé.")
+    return entry
+
+
+class WaveformSaveBody(BaseModel):
+    peaks: list[float]
+
+
+@app.post("/soundconnect/tracks/{track_id}/waveform")
+def soundconnect_save_waveform(track_id: str, body: WaveformSaveBody):
+    data = _waveforms_load()
+    data[track_id] = {"peaks": body.peaks, "computedAt": _now_iso()}
+    _waveforms_save(data)
+    return {"ok": True}
+
+
 def _sc_next_version_filename(current_filename: str, files_in_folder: list, uploaded_filename: str) -> str:
     """Détermine le nom de fichier à utiliser pour une nouvelle version PHONO.
 
