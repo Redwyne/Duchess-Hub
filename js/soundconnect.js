@@ -271,6 +271,8 @@
   // (breadcrumbStack contient toujours l'entrée "workspace" une fois qu'on y
   // est entré, y compris dans les dossiers/projets qu'il contient).
   const KNOWN_LABELS = new Set(["ark", "theory"]);
+  const BRAND_NAMES = { ark: "ARK", theory: "THEORY" };
+  const brandTextEl = document.querySelector(".brand-text");
   function applyLabelTheme() {
     const wsCrumb = breadcrumbStack.find((c) => c.type === "workspace");
     const ws = wsCrumb ? allWorkspaces.find((w) => w.id === wsCrumb.id) : null;
@@ -278,6 +280,12 @@
     const label = KNOWN_LABELS.has(slug) ? slug : null;
     if (label) document.body.setAttribute("data-sc-label", label);
     else document.body.removeAttribute("data-sc-label");
+    // Le nom affiché en haut à gauche suit la librairie choisie (persiste même
+    // en quittant l'onglet Sound Connect, contrairement au fond/à la palette
+    // qui eux ne s'appliquent que dans l'onglet) — reste "DUCHESS" par défaut.
+    if (brandTextEl) {
+      brandTextEl.innerHTML = `${BRAND_NAMES[label] || "DUCHESS"} <em>· Hub</em>`;
+    }
   }
 
   function gotoBreadcrumb(i) {
@@ -1294,6 +1302,23 @@
   playPauseBtn.addEventListener("click", togglePlayPause);
   prevBtn.addEventListener("click", () => playRelative(-1));
   nextBtn.addEventListener("click", () => playRelative(1));
+
+  // Barre d'espace = pause/lecture, comme sur Spotify/YouTube. Sans ce
+  // handler global, la touche espace se contentait de re-cliquer l'élément
+  // qui avait le focus (ex. le bouton ▶ d'un titre tout juste lancé), ce qui
+  // rappelait playQueue() et relançait le titre depuis le début au lieu de le
+  // mettre en pause. On intercepte donc l'espace au niveau du document et on
+  // empêche son comportement par défaut (clic simulé + scroll de page), sauf
+  // si l'utilisateur est en train d'écrire dans un champ (recherche, modales).
+  document.addEventListener("keydown", (e) => {
+    if (e.code !== "Space" && e.key !== " ") return;
+    if (!root.classList.contains("active")) return; // onglet Sound Connect pas actif
+    if (player.classList.contains("hidden")) return; // pas de lecteur actif
+    const tag = (e.target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable) return;
+    e.preventDefault();
+    togglePlayPause();
+  });
   playerCloseBtn.addEventListener("click", () => {
     audioEl.pause();
     audioEl.removeAttribute("src");
