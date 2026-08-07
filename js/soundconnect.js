@@ -45,7 +45,11 @@
   const prevBtn = document.getElementById("sc-prevBtn");
   const nextBtn = document.getElementById("sc-nextBtn");
   const seekEl = document.getElementById("sc-seek");
+  const waveformEl = document.getElementById("sc-waveform");
+  const waveformBgEl = document.getElementById("sc-waveformBg");
+  const waveformFgEl = document.getElementById("sc-waveformFg");
   const volumeEl = document.getElementById("sc-volume");
+  const volumeIconBtn = document.getElementById("sc-volumeIcon");
   const timeCurrentEl = document.getElementById("sc-timeCurrent");
   const timeTotalEl = document.getElementById("sc-timeTotal");
 
@@ -60,6 +64,12 @@
   const newModalName = document.getElementById("sc-newModalName");
   const newModalConfirm = document.getElementById("sc-newModalConfirm");
 
+  const pickerModal = document.getElementById("sc-pickerModal");
+  const pickerModalTitle = document.getElementById("sc-pickerModalTitle");
+  const pickerModalClose = document.getElementById("sc-pickerModalClose");
+  const pickerModalSearch = document.getElementById("sc-pickerModalSearch");
+  const pickerModalResults = document.getElementById("sc-pickerModalResults");
+
   // ---------------------------------------------------------------------
   // État
   // ---------------------------------------------------------------------
@@ -70,6 +80,10 @@
   let newModalMode = "workspace"; // 'workspace' | 'folder' | 'playlist' | 'rename'
   let newModalCtx = {};
   let allWorkspaces = [];
+  let allFoldersFlat = []; // tous les dossiers/projets/playlists, tous espaces (arbre sidebar + pickers)
+  const expandedTreeIds = new Set(); // ids d'espaces/dossiers dépliés dans l'arbre sidebar
+  let pickerOnPick = null;
+  let pickerItemsSource = [];
 
   // ---------------------------------------------------------------------
   // Utilitaires
@@ -597,6 +611,49 @@
     });
   }
 
+  // Silhouette de waveform générée côté client (pas de vraie analyse audio —
+  // aucune donnée d'amplitude n'existe côté backend). Seedée par l'id du titre
+  // pour que chaque piste garde une forme stable plutôt qu'un bruit aléatoire
+  // à chaque rendu ; un léger lissage évite l'aspect "dents de scie".
+  function generateWaveformBars(seedStr) {
+    const BARS = 56;
+    let seed = 0;
+    for (let i = 0; i < seedStr.length; i++) seed = (seed * 31 + seedStr.charCodeAt(i)) >>> 0;
+    function rand() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967295; }
+    const raw = [];
+    for (let i = 0; i < BARS; i++) raw.push(0.22 + rand() * 0.78);
+    const smoothed = raw.map((v, i) => {
+      const prev = raw[i - 1] !== undefined ? raw[i - 1] : v;
+      const next = raw[i + 1] !== undefined ? raw[i + 1] : v;
+      return (prev + v * 2 + next) / 4;
+    });
+    return smoothed.map((v) => `<span class="sc-wave-bar" style="height:${Math.round(v * 100)}%"></span>`).join("");
+  }
+
+  function renderWaveform(track) {
+    const bars = generateWaveformBars(String(track.id || track.title || "x"));
+    waveformBgEl.innerHTML = bars;
+    waveformFgEl.innerHTML = bars;
+    waveformEl.style.setProperty("--progress", "0%");
+  }
+
+  // Icône + piste remplie : synchronise l'affichage sur audioEl.volume (source
+  // de vérité), jamais l'inverse — la logique audio elle-même ne change pas.
+  let volumeBeforeMute = 1;
+  function updateVolumeUI() {
+    const vol = audioEl.volume;
+    volumeEl.style.setProperty("--pct", Math.round(vol * 100) + "%");
+    const level = vol === 0 ? "muted" : vol < 0.5 ? "low" : "high";
+    const icons = {
+      muted: '<path d="M16 9l-6 6M10 9l6 6"></path><polygon points="4 8 8 8 12 4 12 20 8 16 4 16 4 8"></polygon>',
+      low: '<polygon points="4 8 8 8 12 4 12 20 8 16 4 16 4 8"></polygon><path d="M15.5 8.5a5 5 0 0 1 0 7"></path>',
+      high: '<polygon points="4 8 8 8 12 4 12 20 8 16 4 16 4 8"></polygon><path d="M15.5 8.5a5 5 0 0 1 0 7"></path><path d="M18.5 6a9 9 0 0 1 0 12"></path>',
+    };
+    volumeIconBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${icons[level]}</svg>`;
+    volumeIconBtn.title = level === "muted" ? "Rétablir le son" : "Couper le son";
+    volumeIconBtn.setAttribute("aria-label", volumeIconBtn.title);
+  }
+
   function playQueue(tracks, index) {
     currentQueue = tracks;
     currentIndex = index;
@@ -607,6 +664,7 @@
     playerTitleEl.textContent = t.title;
     playerArtistEl.textContent = t.artist;
     playerArt.innerHTML = `<img src="${coverUrl("track", t.id)}" alt="" />`;
+    renderWaveform(t);
     player.classList.remove("hidden");
     updatePlayingHighlight();
   }
@@ -628,7 +686,9 @@
   audioEl.addEventListener("pause", () => { playPauseBtn.textContent = "▶"; });
   audioEl.addEventListener("timeupdate", () => {
     if (!audioEl.duration) return;
-    seekEl.value = String(Math.round((audioEl.currentTime / audioEl.duration) * 1000));
+    const pct = (audioEl.currentTime / audioEl.duration) * 100;
+    seekEl.value = String(Math.round(pct * 10));
+    waveformEl.style.setProperty("--progress", pct + "%");
     timeCurrentEl.textContent = formatTime(audioEl.currentTime);
     timeTotalEl.textContent = formatTime(audioEl.duration);
   });
@@ -641,8 +701,24 @@
   seekEl.addEventListener("input", () => {
     if (!audioEl.duration) return;
     audioEl.currentTime = (Number(seekEl.value) / 1000) * audioEl.duration;
+    waveformEl.style.setProperty("--progress", (Number(seekEl.value) / 10) + "%");
   });
-  volumeEl.addEventListener("input", () => { audioEl.volume = Number(volumeEl.value) / 100; });
+  volumeEl.addEventListener("input", () => {
+    audioEl.volume = Number(volumeEl.value) / 100;
+    if (audioEl.volume > 0) volumeBeforeMute = audioEl.volume;
+    updateVolumeUI();
+  });
+  volumeIconBtn.addEventListener("click", () => {
+    if (audioEl.volume > 0) {
+      volumeBeforeMute = audioEl.volume;
+      audioEl.volume = 0;
+    } else {
+      audioEl.volume = volumeBeforeMute || 1;
+    }
+    volumeEl.value = String(Math.round(audioEl.volume * 100));
+    updateVolumeUI();
+  });
+  updateVolumeUI();
   playPauseBtn.addEventListener("click", togglePlayPause);
   prevBtn.addEventListener("click", () => playRelative(-1));
   nextBtn.addEventListener("click", () => playRelative(1));

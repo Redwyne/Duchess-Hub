@@ -108,6 +108,56 @@
 }
 .sc-sidebar-add:hover { border-color: var(--accent); color: var(--text); }
 
+/* Arbre Library (espace -> artiste -> projet/playlist) : navigation + cibles de
+   drag and drop toujours visibles, quelle que soit la vue affichée à droite. */
+.sc-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--radius-sm);
+  transition: background .12s ease, outline-color .12s ease;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+}
+.sc-tree-row:hover { background: var(--sunken); }
+.sc-tree-row.active .sc-workspace-item,
+.sc-tree-row.active > .sc-tree-item-btn { color: var(--text); }
+.sc-tree-toggle {
+  width: 18px; height: 18px; flex-shrink: 0;
+  background: none; border: none; color: var(--muted-2); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; transition: transform .15s ease, background .12s ease;
+  padding: 0;
+}
+.sc-tree-toggle:hover { background: var(--panel-2); color: var(--text); }
+.sc-tree-toggle.expanded { transform: rotate(90deg); }
+.sc-tree-toggle.spacer { visibility: hidden; cursor: default; }
+.sc-tree-item-btn {
+  flex: 1; min-width: 0;
+  display: flex; align-items: center; gap: 8px;
+  background: none; border: none; color: var(--muted);
+  font-size: 12.5px; font-weight: 500; text-align: left; cursor: pointer;
+  padding: 7px 8px 7px 0; font-family: var(--font-body);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sc-tree-item-btn:hover { color: var(--text); }
+.sc-tree-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  background: var(--muted-2);
+}
+.sc-tree-children { display: flex; flex-direction: column; gap: 1px; padding-left: 16px; }
+.sc-tree-children.hidden { display: none; }
+.sc-tree-empty { font-size: 11px; color: var(--muted-2); padding: 4px 8px 4px 34px; }
+
+/* Drag and drop */
+.sc-draggable[draggable="true"] { cursor: grab; }
+.sc-dragging { opacity: .4; }
+.sc-drop-target-active {
+  outline-color: var(--accent) !important;
+  background: var(--accent-soft) !important;
+}
+.sc-drop-target-active .sc-tree-item-btn { color: var(--accent-2); }
+
 .sc-sidebar-foot {
   margin-top: auto;
   padding-top: 16px;
@@ -289,13 +339,15 @@
   display: grid; grid-template-columns: 220px 1fr 200px; align-items: center; gap: 20px;
   background: var(--panel); border-top: 1px solid var(--border);
   padding: 10px 22px; backdrop-filter: blur(16px);
+  box-shadow: 0 -12px 30px -14px var(--shadow-color);
 }
 .sc-player-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .sc-player-art {
-  width: 42px; height: 42px; border-radius: var(--radius-sm);
+  width: 48px; height: 48px; border-radius: var(--radius-sm);
   background: linear-gradient(135deg, var(--accent), var(--accent-3));
-  display: flex; align-items: center; justify-content: center; color: #0b0b0d; font-size: 17px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center; color: #0b0b0d; font-size: 18px; flex-shrink: 0;
   overflow: hidden;
+  box-shadow: 0 6px 16px -6px var(--accent-soft);
 }
 .sc-player-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .sc-player-text { min-width: 0; }
@@ -303,30 +355,107 @@
 .sc-player-artist { font-size: 11.5px; color: var(--muted-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sc-player-center { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .sc-player-transport { display: flex; align-items: center; gap: 18px; }
-.sc-transport-btn { background: none; border: none; color: var(--muted); font-size: 14px; cursor: pointer; transition: color .15s ease; }
-.sc-transport-btn:hover { color: var(--text); }
+.sc-transport-btn { background: none; border: none; color: var(--muted); font-size: 14px; cursor: pointer; transition: color .15s ease, transform .12s ease; }
+.sc-transport-btn:hover { color: var(--text); transform: translateY(-1px); }
 .sc-transport-play {
-  width: 32px; height: 32px; border-radius: 50%; background: var(--text); color: var(--bg);
-  display: flex; align-items: center; justify-content: center; font-size: 12px; transition: transform .12s ease;
+  width: 34px; height: 34px; border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #0b0b0d;
+  display: flex; align-items: center; justify-content: center; font-size: 12px;
+  box-shadow: 0 8px 18px -8px var(--accent-soft);
+  transition: transform .12s ease, box-shadow .12s ease;
 }
-.sc-transport-play:hover { transform: scale(1.06); color: var(--bg); }
+.sc-transport-play:hover { transform: scale(1.07) translateY(0); color: #0b0b0d; box-shadow: 0 10px 22px -6px var(--accent-soft); }
 .sc-player-progress { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 480px; }
-.sc-time { font-size: 10.5px; color: var(--muted-2); width: 32px; flex-shrink: 0; }
+.sc-time { font-size: 10.5px; color: var(--muted-2); width: 32px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .sc-time:last-child { text-align: right; }
-.sc-player-right { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
-.sc-player-close { background: none; border: none; color: var(--muted-2); cursor: pointer; font-size: 12px; width: 26px; height: 26px; border-radius: 50%; }
+.sc-player-right { display: flex; align-items: center; gap: 14px; justify-content: flex-end; }
+.sc-player-close { background: none; border: none; color: var(--muted-2); cursor: pointer; font-size: 12px; width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; }
 .sc-player-close:hover { background: var(--sunken); color: var(--text); }
 
-input[type="range"].sc-seek, input[type="range"].sc-volume {
-  -webkit-appearance: none; appearance: none; height: 4px; background: var(--border); border-radius: 99px; outline: none; cursor: pointer; flex: 1;
+/* ---------------- Waveform (barre de progression) ---------------- */
+/* Silhouette générée par piste (js/soundconnect.js:generateWaveformBars) plutôt
+   qu'une ligne plate — deux copies identiques des mêmes barres superposées :
+   une en sourdine (fond) et une en accent, découpée via clip-path selon la
+   progression (--progress, mis à jour à chaque timeupdate/seek). L'input range
+   natif reste par-dessus, invisible mais pleinement fonctionnel (drag, clic
+   pour sauter, clavier) — aucune logique de lecture n'est modifiée, seul le
+   rendu visuel change. */
+.sc-waveform {
+  position: relative;
+  flex: 1;
+  height: 28px;
+  display: flex;
+  align-items: center;
 }
-input[type="range"].sc-volume { width: 80px; flex: none; }
-input[type="range"].sc-seek::-webkit-slider-thumb, input[type="range"].sc-volume::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 11px; height: 11px; border-radius: 50%; background: var(--accent); cursor: pointer;
+.sc-waveform-row {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
 }
-input[type="range"].sc-seek::-moz-range-thumb, input[type="range"].sc-volume::-moz-range-thumb {
-  width: 11px; height: 11px; border-radius: 50%; background: var(--accent); cursor: pointer; border: none;
+.sc-waveform-row--bg { color: var(--border); }
+.sc-waveform-row--fg {
+  color: var(--accent);
+  clip-path: inset(0 calc(100% - var(--progress, 0%)) 0 0);
 }
+.sc-wave-bar {
+  flex: 1;
+  min-width: 2px;
+  max-width: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  transition: background-color .15s ease;
+}
+.sc-waveform:hover .sc-waveform-row--bg { color: var(--muted-2); }
+.sc-waveform:has(#sc-seek:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+input[type="range"].sc-seek {
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
+  -webkit-appearance: none; appearance: none; background: transparent; outline: none; cursor: pointer;
+}
+input[type="range"].sc-seek::-webkit-slider-thumb { -webkit-appearance: none; width: 1px; height: 1px; background: transparent; }
+input[type="range"].sc-seek::-moz-range-thumb { width: 1px; height: 1px; background: transparent; border: none; }
+input[type="range"].sc-seek::-moz-range-track { background: transparent; border: none; }
+
+/* ---------------- Volume ---------------- */
+/* Icône haut-parleur (mute/low/high selon niveau, cliquable pour couper le
+   son) + piste remplie en accent jusqu'à la valeur courante — la ligne fine
+   précédente ne se distinguait pas d'un simple séparateur visuel. */
+.sc-volume-group { display: flex; align-items: center; gap: 8px; }
+.sc-volume-icon {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%;
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: color .15s ease, background .15s ease;
+}
+.sc-volume-icon:hover { color: var(--text); background: var(--sunken); }
+.sc-volume-icon svg { width: 16px; height: 16px; }
+
+input[type="range"].sc-volume {
+  -webkit-appearance: none; appearance: none;
+  width: 88px; height: 5px; border-radius: 99px; outline: none; cursor: pointer;
+  background: linear-gradient(to right, var(--accent) 0 var(--pct, 100%), var(--border) var(--pct, 100%) 100%);
+}
+input[type="range"].sc-volume::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%;
+  background: var(--text); border: 2px solid var(--panel);
+  box-shadow: 0 1px 5px rgba(0,0,0,.35); cursor: pointer;
+  transition: transform .12s ease;
+}
+input[type="range"].sc-volume:hover::-webkit-slider-thumb,
+input[type="range"].sc-volume:active::-webkit-slider-thumb { transform: scale(1.15); }
+input[type="range"].sc-volume::-moz-range-thumb {
+  width: 13px; height: 13px; border-radius: 50%; background: var(--text);
+  border: 2px solid var(--panel); cursor: pointer;
+}
+input[type="range"].sc-volume::-moz-range-track { background: var(--border); height: 5px; border-radius: 99px; }
+input[type="range"].sc-volume::-moz-range-progress { background: var(--accent); height: 5px; border-radius: 99px; }
 
 /* ---------------- Modales ---------------- */
 
@@ -355,6 +484,24 @@ input[type="range"].sc-seek::-moz-range-thumb, input[type="range"].sc-volume::-m
 .sc-modal-result-title { font-size: 13px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sc-modal-result-artist { font-size: 11.5px; color: var(--muted-2); }
 .sc-modal-result-add { font-size: 11px; font-weight: 700; color: var(--accent-2); text-transform: uppercase; letter-spacing: .04em; flex-shrink: 0; }
+
+/* Menu clic droit (titres, dossiers/projets/playlists) */
+.sc-ctx-menu {
+  position: fixed; z-index: 80; min-width: 200px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md);
+  box-shadow: 0 24px 48px -16px var(--shadow-color); padding: 6px; display: flex; flex-direction: column;
+}
+.sc-ctx-item {
+  display: flex; align-items: center; gap: 10px;
+  background: none; border: none; color: var(--text); font-size: 13px; font-family: var(--font-body);
+  padding: 9px 10px; border-radius: var(--radius-sm); cursor: pointer; text-align: left; white-space: nowrap;
+}
+.sc-ctx-item:hover { background: var(--sunken); }
+.sc-ctx-item.danger { color: var(--err); }
+.sc-ctx-item:disabled { opacity: .45; cursor: default; }
+.sc-ctx-item:disabled:hover { background: none; }
+.sc-ctx-sep { height: 1px; background: var(--border-soft); margin: 5px 2px; }
+.sc-ctx-item svg { flex-shrink: 0; opacity: .8; }
 
 @media (max-width: 860px) {
   .sc-shell { flex-direction: column; }
