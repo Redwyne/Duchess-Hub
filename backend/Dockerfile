@@ -37,11 +37,24 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV DATA_DIR=/app/data
-# "small" produisait trop d'erreurs d'homophones ("il s'aime" au lieu de "ils s'aiment") —
-# passé à "medium" (le code par défaut dans main.py l'était déjà, mais cette variable ENV du
-# Dockerfile la SURCHARGEAIT silencieusement à "small" à chaque déploiement, annulant le
-# changement — bug trouvé en relisant le Dockerfile, pas en testant le code Python seul).
-ENV WHISPER_MODEL=medium
+# Modèle whisper (2026-08-07, round 7) : passé de "medium" à "large-v3-turbo" (repo CT2
+# public "deepdml/faster-whisper-large-v3-turbo-ct2", ~1,5 Go de poids) suite à la demande de
+# Michel de désactiver la correction Claude et retester avec un whisper "bien puissant" seul.
+# Testé en direct sur l'audio ARK réel (sandbox 3,8 Go de RAM, proxy du plan Pro Render 4 Go) :
+# chargement 4,8s, pic RAM 2,5 Go (large-v3 plein OOM à ce même chargement, écarté), transcription
+# quasi instantanée sur un extrait de 26s, langue française détectée avec confiance 1.00.
+# ⚠️ Correction d'une attribution fausse de ma part : l'erreur récurrente "il s'aime" au lieu de
+# "ils s'aiment" avait été attribuée au modèle "small" (voir historique). En réalité "il s'aime"
+# et "ils s'aiment" se PRONONCENT IDENTIQUEMENT en français — c'est un vrai homophone acoustique,
+# pas un défaut de modèle. Turbo reproduit exactement la même transcription malgré sa taille et sa
+# puissance largement supérieures à "small"/"medium" — confirmé par ce test. Whisper seul (quel
+# que soit le modèle) ne peut PAS résoudre ce type d'ambiguïté depuis l'audio : il faut soit un
+# texte de référence fiable (Flowstage / paroles collées), soit un raisonnement contextuel
+# (correction Claude, actuellement désactivée via ENABLE_CLAUDE_CORRECTION=false). En dehors de ce
+# cas précis, le reste de la transcription (ex. "il remet rendez-vous à demain", "dès le matin")
+# est identique aux vraies paroles sans aucune correction — turbo est un vrai gain de base par
+# rapport à "medium", juste pas une solution aux homophones purs.
+ENV WHISPER_MODEL=deepdml/faster-whisper-large-v3-turbo-ct2
 
 EXPOSE 8000
 

@@ -14,8 +14,9 @@ Etat v2 (styles étendus) :
   (majuscule/normale), couleur d'accent (surlignage karaoké).
 - Anti-débordement : la taille de police est recalculée par cue (auto-fit) pour que les mots/lignes
   longs ne sortent jamais du cadre, sans changer la taille demandée par l'utilisateur pour le reste.
-- Transcription : faster-whisper, modèle défini par la variable d'env WHISPER_MODEL (défaut "small" —
-  voir docs/sous-titres.md pour l'arbitrage qualité/RAM selon le plan Render).
+- Transcription : faster-whisper, modèle défini par la variable d'env WHISPER_MODEL (défaut
+  "large-v3-turbo" via le repo CT2 "deepdml/faster-whisper-large-v3-turbo-ct2" — voir
+  docs/sous-titres.md round 7 pour l'arbitrage qualité/RAM selon le plan Render).
 - Cache "Lyrics Timing" : SQLite local (fichier dans DATA_DIR). Sur le plan Starter de Render le disque
   n'est PAS persistant entre redéploiements -> le cache est reconstruit au besoin, ce n'est pas grave
   pour la mécanique mais à garder en tête (upgrade possible vers un disque persistant Render, ou Postgres,
@@ -64,10 +65,21 @@ RESULTS_DIR = DATA_DIR / "results"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# "small" produisait trop d'erreurs d'homophones (ex. "il s'aime" au lieu de "ils s'aiment")
-# sur les singles absents du catalogue Flowstage — passé à "medium" (~1.5 Go de RAM en int8,
-# large marge sur le plan Pro Render à 4 Go) à la demande de Michel après un test réel raté.
-WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL", "medium")
+# Historique : "small" -> "medium" (voir docs) puis, le 2026-08-07 (round 7), "medium" ->
+# "large-v3-turbo" à la demande de Michel ("desactive la correction Claude et teste un whisper
+# bien puissant pour voir"). Testé en direct : ~2,5 Go de RAM en int8 (large-v3 plein, lui,
+# sature une machine à 3,8 Go dès le chargement du modèle — écarté), transcription quasi
+# instantanée, français détecté avec confiance 1.00. Repo CT2 public utilisé explicitement
+# ("deepdml/faster-whisper-large-v3-turbo-ct2") plutôt que l'alias "turbo" intégré à
+# faster-whisper (mobiuslabsgmbh/...) qui n'a pas été validé par un test direct.
+# Note importante : ce changement ne corrige PAS l'erreur récurrente "il s'aime"/"ils s'aiment"
+# (attribuée à tort à la taille du modèle par le passé) — "il s'aime" et "ils s'aiment" se
+# prononcent IDENTIQUEMENT en français, c'est un vrai homophone acoustique. Turbo produit
+# exactement la même transcription que "small"/"medium" sur ce point précis malgré sa puissance
+# largement supérieure : aucun modèle whisper ne peut lever cette ambiguïté depuis l'audio seul.
+# Seuls un texte de référence fiable (Flowstage / paroles collées) ou un raisonnement contextuel
+# (correction Claude, désactivée pour l'instant, voir ENABLE_CLAUDE_CORRECTION) peuvent trancher.
+WHISPER_MODEL_NAME = os.environ.get("WHISPER_MODEL", "deepdml/faster-whisper-large-v3-turbo-ct2")
 DB_PATH = DATA_DIR / "app.db"
 
 # Clé API Flowstage (app.theflowstage.com/api-keys) — quand elle est renseignée, le backend
