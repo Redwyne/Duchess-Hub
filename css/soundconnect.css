@@ -365,7 +365,7 @@
   transition: transform .12s ease, box-shadow .12s ease;
 }
 .sc-transport-play:hover { transform: scale(1.07) translateY(0); color: #0b0b0d; box-shadow: 0 10px 22px -6px var(--accent-soft); }
-.sc-player-progress { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 480px; }
+.sc-player-progress { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 640px; }
 .sc-time { font-size: 10.5px; color: var(--muted-2); width: 32px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .sc-time:last-child { text-align: right; }
 .sc-player-right { display: flex; align-items: center; gap: 14px; justify-content: flex-end; }
@@ -383,7 +383,7 @@
 .sc-waveform {
   position: relative;
   flex: 1;
-  height: 28px;
+  height: 52px;
   display: flex;
   align-items: center;
 }
@@ -400,11 +400,14 @@
   color: var(--accent);
   clip-path: inset(0 calc(100% - var(--progress, 0%)) 0 0);
 }
+/* flex:1 SANS max-width : le nombre de barres est calculé en JS pour coller
+   pile à la largeur réelle du conteneur (renderWaveform), donc laisser flex
+   grandir librement ici comble tout le rail au lieu de laisser un vide à
+   droite dès que le total (barres + gaps) plafonnait avant la largeur dispo. */
 .sc-wave-bar {
   flex: 1;
-  min-width: 2px;
-  max-width: 3px;
-  border-radius: 2px;
+  min-width: 1px;
+  border-radius: 1.5px;
   background: currentColor;
   transition: background-color .15s ease;
 }

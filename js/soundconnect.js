@@ -246,22 +246,382 @@
   }
 
   // ---------------------------------------------------------------------
-  // Sidebar / espaces
+  // Petit retour visuel transitoire (succès d'une action drag and drop / menu clic droit)
   // ---------------------------------------------------------------------
 
-  async function loadSidebar() {
+  function flashToast(msg) {
+    let el = document.getElementById("sc-toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "sc-toast";
+      el.style.cssText = "position:fixed;bottom:110px;left:50%;transform:translateX(-50%);"
+        + "background:var(--panel);border:1px solid var(--border);color:var(--text);padding:10px 16px;"
+        + "border-radius:8px;font-size:13px;z-index:90;box-shadow:0 10px 30px -10px rgba(0,0,0,.5);"
+        + "opacity:0;transition:opacity .2s ease;pointer-events:none;";
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.style.opacity = "1";
+    clearTimeout(flashToast._t);
+    flashToast._t = setTimeout(() => { el.style.opacity = "0"; }, 1800);
+  }
+
+  // ---------------------------------------------------------------------
+  // Drag and drop (titres -> projets, projets -> artistes, artistes -> espaces)
+  // ---------------------------------------------------------------------
+  // On encode le "type" de ce qui est glissé directement dans le type MIME du
+  // dataTransfer (ex. "application/x-sc-track") plutôt que dans son contenu : c'est le
+  // seul moyen fiable de savoir, pendant un dragover, si l'élément survolé peut accepter
+  // ce qui est en train d'être déposé (le contenu, lui, n'est lisible qu'au drop).
+
+  function attachDragSource(el, payload) {
+    el.classList.add("sc-draggable");
+    el.draggable = true;
+    el.addEventListener("dragstart", (e) => {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData(`application/x-sc-${payload.type}`, JSON.stringify(payload));
+      requestAnimationFrame(() => el.classList.add("sc-dragging"));
+    });
+    el.addEventListener("dragend", () => el.classList.remove("sc-dragging"));
+  }
+
+  function attachDropTarget(el, acceptType, onDrop) {
+    const mime = `application/x-sc-${acceptType}`;
+    el.addEventListener("dragover", (e) => {
+      if (!e.dataTransfer.types.includes(mime)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      el.classList.add("sc-drop-target-active");
+    });
+    el.addEventListener("dragleave", () => el.classList.remove("sc-drop-target-active"));
+    el.addEventListener("drop", (e) => {
+      if (!e.dataTransfer.types.includes(mime)) return;
+      e.preventDefault();
+      el.classList.remove("sc-drop-target-active");
+      const raw = e.dataTransfer.getData(mime);
+      if (!raw) return;
+      try { onDrop(JSON.parse(raw)); } catch (err) {}
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Menu clic droit générique
+  // ---------------------------------------------------------------------
+
+  function closeContextMenu() {
+    const el = document.getElementById("sc-ctxMenu");
+    if (el) el.remove();
+    document.removeEventListener("keydown", onCtxEscClose);
+  }
+  function onCtxEscClose(e) { if (e.key === "Escape") closeContextMenu(); }
+
+  function showContextMenu(x, y, items) {
+    closeContextMenu();
+    const el = document.createElement("div");
+    el.className = "sc-ctx-menu";
+    el.id = "sc-ctxMenu";
+    el.innerHTML = items.map((it, i) => it.sep
+      ? `<div class="sc-ctx-sep"></div>`
+      : `<button type="button" class="sc-ctx-item ${it.danger ? "danger" : ""}" ${it.disabled ? "disabled" : ""} data-idx="${i}">${escapeHtml(it.label)}</button>`
+    ).join("");
+    document.body.appendChild(el);
+    const rect = el.getBoundingClientRect();
+    el.style.left = Math.max(4, Math.min(x, window.innerWidth - rect.width - 8)) + "px";
+    el.style.top = Math.max(4, Math.min(y, window.innerHeight - rect.height - 8)) + "px";
+    el.querySelectorAll("[data-idx]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const it = items[+btn.dataset.idx];
+        closeContextMenu();
+        if (it.onClick) it.onClick();
+      });
+    });
+    setTimeout(() => {
+      document.addEventListener("click", closeContextMenu, { once: true, capture: true });
+      document.addEventListener("contextmenu", closeContextMenu, { once: true, capture: true });
+      document.addEventListener("keydown", onCtxEscClose);
+    }, 0);
+  }
+
+  // ---------------------------------------------------------------------
+  // Modale générique "choisir un dossier/projet/playlist/espace"
+  // ---------------------------------------------------------------------
+
+  function openPicker(title, items, onPick) {
+    pickerModalTitle.textContent = title;
+    pickerItemsSource = items;
+    pickerOnPick = onPick;
+    pickerModalSearch.value = "";
+    renderPickerResults("");
+    pickerModal.classList.remove("hidden");
+    pickerModalSearch.focus();
+  }
+  function closePicker() { pickerModal.classList.add("hidden"); pickerOnPick = null; }
+  pickerModalClose.addEventListener("click", closePicker);
+  pickerModal.addEventListener("click", (e) => { if (e.target === pickerModal) closePicker(); });
+  pickerModalSearch.addEventListener("input", debounce(() => renderPickerResults(pickerModalSearch.value), 150));
+
+  function renderPickerResults(q) {
+    const ql = q.trim().toLowerCase();
+    const filtered = !ql ? pickerItemsSource : pickerItemsSource.filter((f) =>
+      f.name.toLowerCase().includes(ql)
+      || (f.parentName || "").toLowerCase().includes(ql)
+      || (f.workspaceName || "").toLowerCase().includes(ql)
+    );
+    if (!filtered.length) { pickerModalResults.innerHTML = `<div class="sc-search-empty">Aucun résultat.</div>`; return; }
+    pickerModalResults.innerHTML = filtered.slice(0, 150).map((f, i) => `
+      <div class="sc-modal-result" data-idx="${i}">
+        <div class="sc-modal-result-text">
+          <div class="sc-modal-result-title">${escapeHtml(f.name)}</div>
+          <div class="sc-modal-result-artist">${escapeHtml(f.workspaceName || "")}${f.parentName ? " · " + escapeHtml(f.parentName) : ""}</div>
+        </div>
+        <span class="sc-modal-result-add">Choisir</span>
+      </div>
+    `).join("");
+    pickerModalResults.querySelectorAll("[data-idx]").forEach((el) => {
+      el.addEventListener("click", () => {
+        const f = filtered[+el.dataset.idx];
+        const cb = pickerOnPick;
+        closePicker();
+        if (cb) cb(f);
+      });
+    });
+  }
+
+  function pickableProjects() { return allFoldersFlat.filter((f) => f.kind === "project" || f.kind === "playlist"); }
+  function pickableArtistFolders() { return allFoldersFlat.filter((f) => f.kind === "folder"); }
+
+  // ---------------------------------------------------------------------
+  // Actions de réorganisation partagées par le drag and drop ET le menu clic droit
+  // ---------------------------------------------------------------------
+
+  async function moveFolderToWorkspace(folderId, workspaceId, targetName) {
     try {
-      const res = await fetchJSON("/soundconnect/workspaces");
-      allWorkspaces = res.workspaces;
-      workspaceListEl.innerHTML = allWorkspaces.map((ws) => `
-        <button type="button" class="sc-workspace-item" data-id="${ws.id}" data-name="${escapeHtml(ws.name)}">
+      await fetchJSON(`/soundconnect/folders/${folderId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId, parentId: null }),
+      });
+      flashToast(targetName ? `Déplacé vers « ${targetName} ».` : "Déplacé.");
+      await refreshAfterOrgChange();
+    } catch (e) { alert("Impossible de déplacer : " + e.message); }
+  }
+
+  async function moveProjectToFolder(projectId, folderId, workspaceId, targetName) {
+    try {
+      await fetchJSON(`/soundconnect/folders/${projectId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspaceId, parentId: folderId }),
+      });
+      flashToast(targetName ? `Déplacé vers « ${targetName} ».` : "Déplacé.");
+      await refreshAfterOrgChange();
+    } catch (e) { alert("Impossible de déplacer : " + e.message); }
+  }
+
+  async function addTrackToFolder(trackId, folderId, folderName) {
+    try {
+      await fetchJSON(`/soundconnect/folders/${folderId}/tracks`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trackId }),
+      });
+      flashToast(folderName ? `Ajouté à « ${folderName} ».` : "Ajouté.");
+    } catch (e) { alert("Impossible d'ajouter : " + e.message); }
+  }
+
+  async function moveTrackToFolder(trackId, fromFolderId, toFolderId, toFolderName) {
+    try {
+      await fetchJSON(`/soundconnect/folders/${fromFolderId}/tracks/${encodeURIComponent(trackId)}`, { method: "DELETE" });
+      await fetchJSON(`/soundconnect/folders/${toFolderId}/tracks`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trackId }),
+      });
+      flashToast(toFolderName ? `Déplacé vers « ${toFolderName} ».` : "Déplacé.");
+      refreshCurrentView();
+    } catch (e) { alert("Impossible de déplacer : " + e.message); }
+  }
+
+  async function quickRenameFolder(id, currentName) {
+    const name = prompt("Nouveau nom :", currentName);
+    if (!name || !name.trim() || name.trim() === currentName) return;
+    try {
+      await fetchJSON(`/soundconnect/folders/${id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim() }),
+      });
+      await refreshAfterOrgChange();
+    } catch (e) { alert("Échec du renommage : " + e.message); }
+  }
+
+  async function quickDeleteFolder(id) {
+    if (!confirm("Supprimer cet élément et tout son contenu (les titres restent dans le catalogue, seul le classement disparaît) ?")) return;
+    try {
+      await fetchJSON(`/soundconnect/folders/${id}`, { method: "DELETE" });
+      await refreshAfterOrgChange();
+    } catch (e) { alert("Échec de la suppression : " + e.message); }
+  }
+
+  function downloadTrack(t) {
+    window.open(`${BACKEND_BASE_URL}/soundconnect/tracks/${encodeURIComponent(t.id)}/download`, "_blank");
+  }
+
+  function triggerNewVersionUpload(t) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "audio/*,.wav,.aiff,.aif,.flac,.mp3";
+    input.style.display = "none";
+    document.body.appendChild(input);
+    input.addEventListener("change", async () => {
+      const file = input.files[0];
+      input.remove();
+      if (!file) return;
+      if (!confirm(`Uploader « ${file.name} » comme nouvelle version de « ${t.title} » dans PHONO ?\n\nLe fichier sera ajouté à côté des versions existantes (numéro de mix incrémenté), jamais à leur place.`)) return;
+      flashToast("Upload de la nouvelle version en cours…");
+      const fd = new FormData();
+      fd.append("file", file);
+      try {
+        const r = await fetch(`${BACKEND_BASE_URL}/soundconnect/tracks/${encodeURIComponent(t.id)}/new-version`, { method: "POST", body: fd });
+        if (!r.ok) { let detail = r.statusText; try { detail = (await r.json()).detail || detail; } catch (e) {} throw new Error(detail); }
+        const data = await r.json();
+        flashToast(`Nouvelle version envoyée : ${data.track.filename}`);
+        refreshCurrentView();
+      } catch (e) {
+        alert("Échec de l'upload de la nouvelle version : " + e.message);
+      }
+    });
+    input.click();
+  }
+
+  function openPickerForAddTrack(t) {
+    openPicker(`Ajouter « ${t.title} » à…`, pickableProjects(), (target) => addTrackToFolder(t.id, target.id, target.name));
+  }
+
+  function openPickerForMoveTrack(t, currentFolderId) {
+    openPicker(`Déplacer « ${t.title} » vers…`, pickableProjects().filter((f) => f.id !== currentFolderId), (target) => moveTrackToFolder(t.id, currentFolderId, target.id, target.name));
+  }
+
+  function openPickerForMoveFolderToWorkspace(id, name) {
+    const items = allWorkspaces.filter((w) => true).map((w) => ({ id: w.id, name: w.name, workspaceName: "Espace", parentName: null }));
+    openPicker(`Déplacer « ${name} » vers…`, items, (target) => moveFolderToWorkspace(id, target.id, target.name));
+  }
+
+  function openPickerForMoveProjectToFolder(id, name) {
+    openPicker(`Déplacer « ${name} » vers…`, pickableArtistFolders(), (target) => moveProjectToFolder(id, target.id, target.workspaceId, target.name));
+  }
+
+  // ---------------------------------------------------------------------
+  // Sidebar / arbre Library (espace -> artiste -> projet/playlist)
+  // ---------------------------------------------------------------------
+
+  function findFlatFolder(id) { return allFoldersFlat.find((f) => f.id === id); }
+
+  function breadcrumbAncestorsFor(folderId) {
+    const chain = [];
+    let cur = findFlatFolder(folderId);
+    while (cur) { chain.unshift(cur); cur = cur.parentId ? findFlatFolder(cur.parentId) : null; }
+    const ws = chain.length ? allWorkspaces.find((w) => w.id === chain[0].workspaceId) : null;
+    const stack = [{ type: "home", name: "Home" }];
+    if (ws) stack.push({ type: "workspace", id: ws.id, name: ws.name });
+    chain.forEach((f, i) => { if (i < chain.length - 1) stack.push({ type: "folder", id: f.id, name: f.name }); });
+    return stack;
+  }
+
+  function openFromTree(folderId) {
+    const f = findFlatFolder(folderId);
+    if (!f) return;
+    showFolder(folderId, f.name, breadcrumbAncestorsFor(folderId));
+  }
+
+  function refreshCurrentView() {
+    const last = breadcrumbStack[breadcrumbStack.length - 1];
+    if (!last || last.type === "home") showHome();
+    else if (last.type === "search") showSearch();
+    else if (last.type === "workspace") showWorkspace(last.id, last.name);
+    else if (last.type === "folder") showFolder(last.id, last.name, breadcrumbStack.slice(0, -1));
+  }
+
+  async function refreshAfterOrgChange() {
+    await loadSidebar();
+    refreshCurrentView();
+  }
+
+  function groupFoldersByParent(folders) {
+    const map = new Map();
+    for (const f of folders) {
+      const key = `${f.workspaceId}::${f.parentId || "root"}`;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key).push(f);
+    }
+    return map;
+  }
+
+  function renderTreeChildren(workspaceId, parentId, grouped, depth) {
+    const items = (grouped.get(`${workspaceId}::${parentId || "root"}`) || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+    return items.map((f) => renderTreeNode(f, grouped, depth)).join("");
+  }
+
+  function renderTreeNode(f, grouped, depth) {
+    const hasChildren = grouped.has(`${f.workspaceId}::${f.id}`);
+    const expanded = expandedTreeIds.has(f.id);
+    const treeKind = f.kind === "folder" ? "folder" : "project";
+    return `
+      <div class="sc-tree-row" data-tree-kind="${treeKind}" data-id="${f.id}" data-workspace-id="${f.workspaceId}" data-name="${escapeHtml(f.name)}" style="padding-left:${depth * 10}px;">
+        ${hasChildren ? `<button type="button" class="sc-tree-toggle ${expanded ? "expanded" : ""}" data-toggle-id="${f.id}">▸</button>` : `<span class="sc-tree-toggle spacer">▸</span>`}
+        <button type="button" class="sc-tree-item-btn" data-open-id="${f.id}" data-open-kind="${f.kind}"><span class="sc-tree-dot"></span>${escapeHtml(f.name)}</button>
+      </div>
+      ${hasChildren && expanded ? `<div class="sc-tree-children" data-children-for="${f.id}">${renderTreeChildren(f.workspaceId, f.id, grouped, depth + 1)}</div>` : ""}
+    `;
+  }
+
+  function renderTreeWorkspace(ws, grouped) {
+    const hasChildren = grouped.has(`${ws.id}::root`);
+    const expanded = expandedTreeIds.has(ws.id);
+    return `
+      <div class="sc-tree-row sc-workspace-row" data-tree-kind="workspace" data-id="${ws.id}" data-name="${escapeHtml(ws.name)}">
+        ${hasChildren ? `<button type="button" class="sc-tree-toggle ${expanded ? "expanded" : ""}" data-toggle-id="${ws.id}">▸</button>` : `<span class="sc-tree-toggle spacer">▸</span>`}
+        <button type="button" class="sc-workspace-item" data-open-id="${ws.id}" data-open-kind="workspace">
           <span class="sc-workspace-icon">${escapeHtml(initials(ws.name))}</span>
           <span>${escapeHtml(ws.name)}</span>
         </button>
-      `).join("");
-      workspaceListEl.querySelectorAll(".sc-workspace-item").forEach((el) => {
-        el.addEventListener("click", () => showWorkspace(el.dataset.id, el.dataset.name));
+      </div>
+      ${hasChildren && expanded ? `<div class="sc-tree-children" data-children-for="${ws.id}">${renderTreeChildren(ws.id, null, grouped, 1)}</div>` : ""}
+    `;
+  }
+
+  function renderSidebarTree() {
+    const grouped = groupFoldersByParent(allFoldersFlat);
+    workspaceListEl.innerHTML = allWorkspaces.map((ws) => renderTreeWorkspace(ws, grouped)).join("");
+
+    workspaceListEl.querySelectorAll("[data-toggle-id]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = btn.dataset.toggleId;
+        if (expandedTreeIds.has(id)) expandedTreeIds.delete(id); else expandedTreeIds.add(id);
+        renderSidebarTree();
       });
+    });
+    workspaceListEl.querySelectorAll("[data-open-id]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const row = btn.closest("[data-tree-kind]");
+        if (btn.dataset.openKind === "workspace") showWorkspace(btn.dataset.openId, row.dataset.name);
+        else openFromTree(btn.dataset.openId);
+      });
+    });
+    workspaceListEl.querySelectorAll('.sc-tree-row[data-tree-kind="workspace"]').forEach((row) => {
+      attachDropTarget(row, "folder", (payload) => moveFolderToWorkspace(payload.id, row.dataset.id, row.dataset.name));
+    });
+    workspaceListEl.querySelectorAll('.sc-tree-row[data-tree-kind="folder"]').forEach((row) => {
+      attachDropTarget(row, "project", (payload) => moveProjectToFolder(payload.id, row.dataset.id, row.dataset.workspaceId, row.dataset.name));
+    });
+    workspaceListEl.querySelectorAll('.sc-tree-row[data-tree-kind="project"]').forEach((row) => {
+      attachDropTarget(row, "track", (payload) => addTrackToFolder(payload.id, row.dataset.id, row.dataset.name));
+    });
+  }
+
+  async function loadSidebar() {
+    try {
+      const [wsRes, foldersRes] = await Promise.all([
+        fetchJSON("/soundconnect/workspaces"),
+        fetchJSON("/soundconnect/folders"),
+      ]);
+      allWorkspaces = wsRes.workspaces;
+      allFoldersFlat = foldersRes.folders;
+      renderSidebarTree();
     } catch (e) {
       workspaceListEl.innerHTML = `<div class="sc-empty-sub">Erreur de chargement</div>`;
     }
@@ -306,6 +666,33 @@
           const detail = await fetchJSON(`/soundconnect/folders/${btn.dataset.playId}`);
           if (detail.tracks.length) playQueue(detail.tracks, 0);
         } catch (err) {}
+      });
+    });
+    // Drag and drop : un dossier artiste se glisse dans un espace (sidebar), un
+    // projet/playlist se glisse dans un dossier artiste (sidebar) — voir attachDropTarget
+    // côté arbre sidebar. Clic droit = équivalent accessible sans glisser-déposer.
+    contentEl.querySelectorAll('.sc-tile[data-kind="folder"]').forEach((el) => {
+      attachDragSource(el, { type: "folder", id: el.dataset.id });
+      el.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        showContextMenu(e.clientX, e.clientY, [
+          { label: "Déplacer vers un autre espace…", onClick: () => openPickerForMoveFolderToWorkspace(el.dataset.id, el.dataset.name) },
+          { label: "Renommer…", onClick: () => quickRenameFolder(el.dataset.id, el.dataset.name) },
+          { sep: true },
+          { label: "Supprimer", danger: true, onClick: () => quickDeleteFolder(el.dataset.id) },
+        ]);
+      });
+    });
+    contentEl.querySelectorAll('.sc-tile[data-kind="project"], .sc-tile[data-kind="playlist"]').forEach((el) => {
+      attachDragSource(el, { type: "project", id: el.dataset.id });
+      el.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        showContextMenu(e.clientX, e.clientY, [
+          { label: "Déplacer vers un artiste…", onClick: () => openPickerForMoveProjectToFolder(el.dataset.id, el.dataset.name) },
+          { label: "Renommer…", onClick: () => quickRenameFolder(el.dataset.id, el.dataset.name) },
+          { sep: true },
+          { label: "Supprimer", danger: true, onClick: () => quickDeleteFolder(el.dataset.id) },
+        ]);
       });
     });
   }
@@ -449,6 +836,22 @@
         });
       });
     }
+    // Drag and drop : un titre se glisse dans un projet/playlist de l'arbre sidebar
+    // (ajout, jamais retrait automatique de la vue courante). Clic droit = mêmes
+    // actions accessibles sans glisser-déposer, plus téléchargement et nouvelle version.
+    container.querySelectorAll(".sc-track-item").forEach((el, i) => {
+      const t = tracks[i];
+      attachDragSource(el, { type: "track", id: t.id });
+      el.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        const items = [{ label: "Ajouter au projet…", onClick: () => openPickerForAddTrack(t) }];
+        if (removable && folderId) items.push({ label: "Déplacer vers…", onClick: () => openPickerForMoveTrack(t, folderId) });
+        items.push({ sep: true });
+        items.push({ label: "Télécharger (WAV)", onClick: () => downloadTrack(t) });
+        items.push({ label: "Nouvelle version…", onClick: () => triggerNewVersionUpload(t) });
+        showContextMenu(e.clientX, e.clientY, items);
+      });
+    });
     updatePlayingHighlight();
   }
 
@@ -611,30 +1014,78 @@
     });
   }
 
-  // Silhouette de waveform générée côté client (pas de vraie analyse audio —
-  // aucune donnée d'amplitude n'existe côté backend). Seedée par l'id du titre
-  // pour que chaque piste garde une forme stable plutôt qu'un bruit aléatoire
-  // à chaque rendu ; un léger lissage évite l'aspect "dents de scie".
-  function generateWaveformBars(seedStr) {
-    const BARS = 56;
+  // Waveform : d'abord une silhouette générée instantanément (retour visuel
+  // immédiat + filet de sécurité), puis remplacée par la VRAIE forme d'onde
+  // décodée depuis le fichier audio (Web Audio API) dès qu'elle est prête.
+  // Requête d'analyse séparée du <audio> de lecture — si elle échoue (CORS,
+  // format, etc.) on garde simplement la silhouette générée, la lecture
+  // elle-même n'est jamais affectée.
+  function barsMarkup(values) {
+    return values.map((v) => `<span class="sc-wave-bar" style="height:${Math.max(6, Math.round(v * 100))}%"></span>`).join("");
+  }
+
+  function generateFakePeaks(seedStr, count) {
     let seed = 0;
     for (let i = 0; i < seedStr.length; i++) seed = (seed * 31 + seedStr.charCodeAt(i)) >>> 0;
     function rand() { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967295; }
     const raw = [];
-    for (let i = 0; i < BARS; i++) raw.push(0.22 + rand() * 0.78);
-    const smoothed = raw.map((v, i) => {
+    for (let i = 0; i < count; i++) raw.push(0.15 + rand() * 0.85);
+    return raw.map((v, i) => {
       const prev = raw[i - 1] !== undefined ? raw[i - 1] : v;
       const next = raw[i + 1] !== undefined ? raw[i + 1] : v;
       return (prev + v * 2 + next) / 4;
     });
-    return smoothed.map((v) => `<span class="sc-wave-bar" style="height:${Math.round(v * 100)}%"></span>`).join("");
   }
 
+  async function computeRealPeaks(url, count) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("waveform fetch failed");
+    const buf = await res.arrayBuffer();
+    const ctx = new AC();
+    try {
+      const audioBuffer = await ctx.decodeAudioData(buf);
+      const data = audioBuffer.getChannelData(0);
+      const bucketSize = Math.max(1, Math.floor(data.length / count));
+      const peaks = [];
+      for (let i = 0; i < count; i++) {
+        let max = 0;
+        const start = i * bucketSize;
+        const end = Math.min(data.length, start + bucketSize);
+        for (let j = start; j < end; j++) {
+          const v = Math.abs(data[j]);
+          if (v > max) max = v;
+        }
+        peaks.push(max);
+      }
+      // Normalise sur le pic réel de la piste pour occuper toute la hauteur
+      // disponible même si le morceau n'est jamais mixé à fond.
+      const globalMax = Math.max(0.02, ...peaks);
+      return peaks.map((v) => v / globalMax);
+    } finally {
+      ctx.close();
+    }
+  }
+
+  let waveformToken = 0;
   function renderWaveform(track) {
-    const bars = generateWaveformBars(String(track.id || track.title || "x"));
-    waveformBgEl.innerHTML = bars;
-    waveformFgEl.innerHTML = bars;
+    const myToken = ++waveformToken;
+    const BAR_PITCH = 5; // largeur + espace visés par barre — barres calées exactement sur la largeur réelle du conteneur, jamais de vide résiduel sur le côté.
+    const count = Math.max(30, Math.floor((waveformEl.clientWidth || 480) / BAR_PITCH));
+    const fake = generateFakePeaks(String(track.id || track.title || "x"), count);
+    waveformBgEl.innerHTML = barsMarkup(fake);
+    waveformFgEl.innerHTML = barsMarkup(fake);
     waveformEl.style.setProperty("--progress", "0%");
+    if (!track.downloadUrl) return;
+    computeRealPeaks(track.downloadUrl, count)
+      .then((peaks) => {
+        if (!peaks || myToken !== waveformToken) return; // piste changée entretemps, on ignore le résultat
+        const html = barsMarkup(peaks);
+        waveformBgEl.innerHTML = html;
+        waveformFgEl.innerHTML = html;
+      })
+      .catch(() => {}); // échec d'analyse (CORS, format...) : silhouette générée conservée telle quelle
   }
 
   // Icône + piste remplie : synchronise l'affichage sur audioEl.volume (source
