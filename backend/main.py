@@ -2436,6 +2436,28 @@ def soundconnect_remove_track_from_folder(folder_id: str, track_id: str):
     return {"removed": True}
 
 
+class SCReorderTracksBody(BaseModel):
+    trackIds: List[str]
+
+
+@app.put("/soundconnect/folders/{folder_id}/tracks/reorder")
+def soundconnect_reorder_folder_tracks(folder_id: str, body: SCReorderTracksBody):
+    """Change l'ordre d'affichage des titres d'un projet (glisser-déposer par la
+    poignée à gauche, côté frontend) — l'ordre dans folderTracks[folder_id] EST
+    l'ordre d'affichage, aucun autre champ à mettre à jour. Ne touche jamais PHONO."""
+    data = _org_load()
+    if folder_id not in data["folders"]:
+        raise HTTPException(status_code=404, detail="Dossier introuvable.")
+    current = data["folderTracks"].get(folder_id, [])
+    # Le nouvel ordre doit contenir exactement les mêmes titres que l'actuel —
+    # un reorder ne doit jamais servir à ajouter/retirer un titre en douce.
+    if set(body.trackIds) != set(current):
+        raise HTTPException(status_code=400, detail="La liste envoyée ne correspond pas aux titres actuels de ce dossier.")
+    data["folderTracks"][folder_id] = body.trackIds
+    _org_save(data)
+    return {"reordered": True}
+
+
 @app.get("/soundconnect/folders")
 def soundconnect_list_all_folders(kind: Optional[str] = None):
     """Liste à plat TOUS les dossiers/projets/playlists, tous espaces confondus, avec le

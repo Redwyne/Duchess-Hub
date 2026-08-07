@@ -1017,15 +1017,43 @@
     renderTrackList(document.getElementById("sc-projectTracks"), tracks, { removable: true, folderId: f.id });
   }
 
+  const DRAG_HANDLE_SVG = `<svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden="true">
+    <circle cx="2.5" cy="2.5" r="1.4"></circle><circle cx="7.5" cy="2.5" r="1.4"></circle>
+    <circle cx="2.5" cy="8" r="1.4"></circle><circle cx="7.5" cy="8" r="1.4"></circle>
+    <circle cx="2.5" cy="13.5" r="1.4"></circle><circle cx="7.5" cy="13.5" r="1.4"></circle>
+  </svg>`;
+
+  // Réordonnancement des titres d'un projet, par glisser-déposer à partir de la
+  // poignée à 6 points — l'ordre vit dans folderTracks côté backend (aucune
+  // incidence sur PHONO). Optimiste côté UI : on réordonne localement tout de
+  // suite, l'appel réseau part en arrière-plan ; en cas d'échec on revient à
+  // l'état serveur via refreshCurrentView().
+  async function reorderTracksInFolder(folderId, orderedTrackIds) {
+    try {
+      await fetchJSON(`/soundconnect/folders/${folderId}/tracks/reorder`, {
+        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ trackIds: orderedTrackIds }),
+      });
+      invalidateFolderCache();
+    } catch (e) {
+      flashToast("Impossible de réordonner : " + (e.message || ""));
+      refreshCurrentView();
+    }
+  }
+
   function renderTrackList(container, tracks, { removable, folderId }) {
     if (!tracks.length) {
       container.innerHTML = `<div class="sc-empty-sub" style="padding:20px 0;">Aucun titre ici pour l'instant.</div>`;
       return;
     }
+    const reorderable = !!(removable && folderId);
     container.innerHTML = tracks.map((t, i) => `
       <div class="sc-track-item" data-track-id="${t.id}">
+        ${reorderable ? `<span class="sc-track-drag-handle" draggable="true" title="Glisser pour réordonner" aria-label="Réordonner">${DRAG_HANDLE_SVG}</span>` : `<span class="sc-track-drag-handle-spacer"></span>`}
         <div class="sc-track-index">${i + 1}</div>
-        <button type="button" class="sc-track-playbtn" data-idx="${i}">▶</button>
+        <button type="button" class="sc-track-playbtn" data-idx="${i}" aria-label="Lecture/Pause">
+          <span class="sc-track-playbtn-icon">▶</span>
+          <span class="sc-track-eq" aria-hidden="true"><i></i><i></i><i></i></span>
+        </button>
         <div class="sc-track-cover">${coverBlockHtml("track", t.id, "sc-cover-edit-btn--sm")}</div>
         <div class="sc-track-title-cell">
           <div class="sc-track-name">${escapeHtml(t.title)} ${badgeFor(t)}</div>
@@ -1038,7 +1066,7 @@
     `).join("");
     container.querySelectorAll(".sc-track-playbtn, .sc-track-item").forEach((el) => {
       el.addEventListener("click", (e) => {
-        if (e.target.closest(".sc-track-link") || e.target.closest(".sc-track-menu") || e.target.closest(".sc-cover-edit-btn")) return;
+        if (e.target.closest(".sc-track-link") || e.target.closest(".sc-track-menu") || e.target.closest(".sc-cover-edit-btn") || e.target.closest(".sc-track-drag-handle")) return;
         const item = e.currentTarget.closest(".sc-track-item") || e.currentTarget;
         const idx = [...container.querySelectorAll(".sc-track-item")].indexOf(item);
         if (idx >= 0) playQueue(tracks, idx);
@@ -1052,8 +1080,7 @@
           try {
             await fetchJSON(`/soundconnect/folders/${folderId}/tracks/${encodeURIComponent(t.id)}`, { method: "DELETE" });
             invalidateFolderCache();
-            const detail = await fetchJSON(`/soundconnect/folders/${folderId}`);
-            renderProjectDetail(detail);
+            refreshCurrentView();
           } catch (err) {}
         });
       });
@@ -1074,6 +1101,63 @@
         showContextMenu(e.clientX, e.clientY, items);
       });
     });
+
+    if (reorderable) {
+      const rows = [...container.querySelectorAll(".sc-track-item")];
+      let dragFromIndex = -1;
+
+      const clearIndicators = () => rows.forEach((r) => r.classList.remove("sc-reorder-over-above", "sc-reorder-over-below"));
+
+      container.querySelectorAll(".sc-track-drag-handle").forEach((handle, i) => {
+        const row = rows[i];
+        handle.addEventListener("dragstart", (e) => {
+          dragFromIndex = i;
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("application/x-sc-track-reorder", String(i));
+          // On veut voir la ligne entière suivre le curseur, pas juste la petite poignée.
+          e.dataTransfer.setDragImage(row, 16, row.offsetHeight / 2);
+          requestAnimationFrame(() => row.classList.add("sc-dragging"));
+        });
+        handle.addEventListener("dragend", () => {
+          row.classList.remove("sc-dragging");
+          clearIndicators();
+          dragFromIndex = -1;
+        });
+      });
+
+      rows.forEach((row, i) => {
+        row.addEventListener("dragover", (e) => {
+          if (!e.dataTransfer.types.includes("application/x-sc-track-reorder")) return;
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          const rect = row.getBoundingClientRect();
+          const above = e.clientY - rect.top < rect.height / 2;
+          clearIndicators();
+          row.classList.add(above ? "sc-reorder-over-above" : "sc-reorder-over-below");
+        });
+        row.addEventListener("dragleave", (e) => {
+          if (!row.contains(e.relatedTarget)) row.classList.remove("sc-reorder-over-above", "sc-reorder-over-below");
+        });
+        row.addEventListener("drop", (e) => {
+          if (!e.dataTransfer.types.includes("application/x-sc-track-reorder")) return;
+          e.preventDefault();
+          clearIndicators();
+          const from = dragFromIndex;
+          if (from < 0 || from === i) return;
+          const rect = row.getBoundingClientRect();
+          const above = e.clientY - rect.top < rect.height / 2;
+          let to = above ? i : i + 1;
+          if (to > from) to -= 1; // le retrait de l'élément source décale les index suivants
+          if (to === from) return;
+          const reordered = tracks.slice();
+          const [moved] = reordered.splice(from, 1);
+          reordered.splice(to, 0, moved);
+          renderTrackList(container, reordered, { removable, folderId });
+          reorderTracksInFolder(folderId, reordered.map((tr) => tr.id));
+        });
+      });
+    }
+
     updatePlayingHighlight();
   }
 
@@ -1262,8 +1346,16 @@
 
   function updatePlayingHighlight() {
     const currentId = currentIndex >= 0 && currentQueue[currentIndex] ? currentQueue[currentIndex].id : null;
+    // "playing" = ce titre est celui chargé (en pause ou en lecture) — état déjà
+    // existant. "playing-audio" = le son est RÉELLEMENT en train de jouer (pas en
+    // pause) — pilote l'icône ▶ vs le petit égaliseur animé (voir sc-track-eq
+    // dans le gabarit + CSS), synchronisée sur le vrai état de audioEl (source de
+    // vérité), jamais l'inverse.
+    const audioPlaying = !!currentId && !audioEl.paused;
     document.querySelectorAll(".sc-track-item").forEach((el) => {
-      el.classList.toggle("playing", !!currentId && el.dataset.trackId === currentId);
+      const isCurrent = !!currentId && el.dataset.trackId === currentId;
+      el.classList.toggle("playing", isCurrent);
+      el.classList.toggle("playing-audio", isCurrent && audioPlaying);
     });
   }
 
@@ -1420,8 +1512,8 @@
     playQueue(currentQueue, next);
   }
 
-  audioEl.addEventListener("play", () => { playPauseBtn.textContent = "⏸"; });
-  audioEl.addEventListener("pause", () => { playPauseBtn.textContent = "▶"; });
+  audioEl.addEventListener("play", () => { playPauseBtn.textContent = "⏸"; updatePlayingHighlight(); });
+  audioEl.addEventListener("pause", () => { playPauseBtn.textContent = "▶"; updatePlayingHighlight(); });
   audioEl.addEventListener("timeupdate", () => {
     if (!audioEl.duration) return;
     const pct = (audioEl.currentTime / audioEl.duration) * 100;

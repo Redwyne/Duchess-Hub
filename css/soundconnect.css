@@ -309,14 +309,48 @@
 .sc-track-list { display: flex; flex-direction: column; gap: 1px; }
 .sc-track-item {
   display: grid;
-  grid-template-columns: 26px 34px 1fr auto auto 28px;
+  grid-template-columns: 16px 26px 34px 1fr auto auto 28px;
   align-items: center;
   gap: 14px;
   padding: 9px 10px;
   border-radius: var(--radius-sm);
   transition: background .12s ease;
+  position: relative;
 }
 .sc-track-item:hover { background: var(--row-hover); }
+
+/* Poignée de réordonnancement (6 points) — visible seulement au survol d'une
+   liste de titres qui appartient à un projet précis (pas la recherche globale,
+   où l'ordre n'a pas de sens). On ne glisse qu'à partir de cette poignée : le
+   reste de la ligne garde son propre glisser-déposer (ajouter à un projet). */
+.sc-track-drag-handle {
+  width: 16px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted-2);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity .12s ease, color .12s ease;
+}
+.sc-track-item:hover .sc-track-drag-handle { opacity: 1; }
+.sc-track-drag-handle:hover { color: var(--text); }
+.sc-track-drag-handle:active { cursor: grabbing; }
+.sc-track-drag-handle-spacer { width: 16px; }
+
+.sc-track-item.sc-reorder-over-above::before,
+.sc-track-item.sc-reorder-over-below::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+}
+.sc-track-item.sc-reorder-over-above::before { top: 0; }
+.sc-track-item.sc-reorder-over-below::after { bottom: 0; }
 .sc-track-index { color: var(--muted-2); font-size: 12px; text-align: center; }
 .sc-track-item:hover .sc-track-index, .sc-track-item.playing .sc-track-index { display: none; }
 .sc-track-playbtn { display: none; width: 20px; height: 20px; align-items: center; justify-content: center; background: none; border: none; color: var(--text); cursor: pointer; font-size: 11px; }
