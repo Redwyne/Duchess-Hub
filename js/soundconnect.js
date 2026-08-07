@@ -1069,7 +1069,15 @@
         if (e.target.closest(".sc-track-link") || e.target.closest(".sc-track-menu") || e.target.closest(".sc-cover-edit-btn") || e.target.closest(".sc-track-drag-handle")) return;
         const item = e.currentTarget.closest(".sc-track-item") || e.currentTarget;
         const idx = [...container.querySelectorAll(".sc-track-item")].indexOf(item);
-        if (idx >= 0) playQueue(tracks, idx);
+        if (idx < 0) return;
+        const t = tracks[idx];
+        // Reclique sur le titre déjà chargé (celui avec l'icône ▶/égaliseur
+        // synchronisée) = pause/reprise en place, comme l'espace ou le bouton
+        // du lecteur — jamais un redémarrage depuis 0 (même bug que corrigé
+        // précédemment pour la barre d'espace, ici côté clic sur la liste).
+        const isCurrent = currentIndex >= 0 && currentQueue[currentIndex] && currentQueue[currentIndex].id === t.id;
+        if (isCurrent) togglePlayPause();
+        else playQueue(tracks, idx);
       });
     });
     if (removable) {
