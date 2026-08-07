@@ -37,6 +37,7 @@ import json
 import mimetypes
 import os
 import re
+import secrets
 import shutil
 import sqlite3
 import subprocess
@@ -177,6 +178,12 @@ def upload_to_r2(local_path: Path, key: str):
 ADMIN_AUTH_SECRET = os.environ.get("ADMIN_AUTH_SECRET", "")
 ADMIN_USERS_JSON = os.environ.get("ADMIN_USERS", "[]")
 ADMIN_TOKEN_TTL_S = 20 * 60  # 20 min
+
+# Base publique du frontend statique, utilisée pour construire l'URL complète
+# d'un lien de partage externe (Sound Connect) renvoyée à l'admin. Le frontend
+# réellement actif a été vérifié en direct (duchess-hub.netlify.app renvoie
+# 404) : c'est bien le service Render qui sert le site.
+PUBLIC_SHARE_BASE_URL = os.environ.get("PUBLIC_SHARE_BASE_URL", "https://duchess-hub-front.onrender.com")
 
 MAKE_INVENTAIRE_URLS = {
     "list": os.environ.get("MAKE_INVENTAIRE_LIST_URL", ""),
@@ -2121,17 +2128,26 @@ def _slugify(name: str) -> str:
 
 
 def _org_default() -> dict:
-    return {"workspaces": {}, "folders": {}, "tracks": {}, "folderTracks": {}}
+    return {"workspaces": {}, "folders": {}, "tracks": {}, "folderTracks": {}, "shares": {}}
+
+
+def _org_with_defaults(data: dict) -> dict:
+    """Complète un org.json déjà existant (créé avant l'ajout d'une nouvelle
+    clé racine, ex. "shares") avec les clés manquantes, sans jamais écraser
+    les données déjà présentes."""
+    for k, v in _org_default().items():
+        data.setdefault(k, v)
+    return data
 
 
 def _org_load() -> dict:
     if SOUNDCONNECT_ORG_PATH.exists():
-        return json.loads(SOUNDCONNECT_ORG_PATH.read_text(encoding="utf-8"))
+        return _org_with_defaults(json.loads(SOUNDCONNECT_ORG_PATH.read_text(encoding="utf-8")))
     if R2_ENABLED:
         try:
             client = get_r2_client()
             obj = client.get_object(Bucket=R2_BUCKET_NAME, Key="soundconnect/org.json")
-            data = json.loads(obj["Body"].read().decode("utf-8"))
+            data = _org_with_defaults(json.loads(obj["Body"].read().decode("utf-8")))
             SOUNDCONNECT_ORG_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
             return data
         except Exception:  # noqa: BLE001 — pas encore de sauvegarde, organisation vide
@@ -2510,15 +2526,12 @@ def _sc_find_in_folder(folder_id: str, *, external_id: Optional[str] = None, fil
     return None
 
 
-@app.get("/soundconnect/tracks/{track_id}/download")
-def soundconnect_track_download(track_id: str):
+def _fresh_track_download_url(track: dict) -> Optional[str]:
     """Les liens SharePoint (`@microsoft.graph.downloadUrl`) sont temporaires — le lien
     mis en cache lors du dernier sync PHONO a très probablement expiré. On relit le
-    dossier d'origine pour en obtenir un frais avant de rediriger dessus."""
-    data = _org_load()
-    track = data["tracks"].get(track_id)
-    if not track:
-        raise HTTPException(status_code=404, detail="Titre introuvable.")
+    dossier d'origine pour en obtenir un frais avant de l'utiliser. Partagée par le
+    téléchargement admin ET les endpoints publics de partage externe, pour ne jamais
+    dupliquer cette logique (ni le risque d'oublier de la rafraîchir quelque part)."""
     fresh_url = None
     if track.get("parentFolderId"):
         try:
@@ -2527,7 +2540,16 @@ def soundconnect_track_download(track_id: str):
                 fresh_url = match.get("downloadUrl")
         except HTTPException:
             pass  # Make/PHONO indisponible -> on retombe sur le lien en cache ci-dessous
-    fresh_url = fresh_url or track.get("downloadUrl")
+    return fresh_url or track.get("downloadUrl")
+
+
+@app.get("/soundconnect/tracks/{track_id}/download")
+def soundconnect_track_download(track_id: str):
+    data = _org_load()
+    track = data["tracks"].get(track_id)
+    if not track:
+        raise HTTPException(status_code=404, detail="Titre introuvable.")
+    fresh_url = _fresh_track_download_url(track)
     if not fresh_url:
         raise HTTPException(status_code=404, detail="Aucun lien de téléchargement disponible — resynchronise le catalogue.")
     return RedirectResponse(fresh_url)
@@ -2848,3 +2870,300 @@ def soundconnect_delete_cover(kind: str, entity_id: str):
         except Exception:  # noqa: BLE001
             pass
     return {"removed": removed}
+
+
+# --------------------------------------------------------------------------
+# Partage externe — liens publics pour un titre ou un projet (Sound Connect)
+#
+# Un "share" pointe vers un titre OU un projet (kind="project"/"playlist") déjà
+# organisé dans Sound Connect. Il ne duplique JAMAIS le fichier : au moment où
+# quelqu'un écoute/télécharge via le lien public, on relit PHONO pour obtenir
+# un lien SharePoint frais (_fresh_track_download_url, la même fonction que le
+# téléchargement admin) — donc aucune donnée binaire n'est stockée côté
+# partage, et rien n'est jamais écrit dans PHONO/SharePoint par ce mécanisme
+# (cf. garantie donnée à Michel : seul le flux "Nouvelle version" écrit dans
+# PHONO, jamais le classement/suppression/partage côté Sound Connect).
+#
+# Le "token" public ET l'id admin sont la MÊME valeur (uuid4.hex, 122 bits
+# d'aléatoire — largement suffisant pour ne pas être devinable), pour rester
+# simple : pas de mapping supplémentaire à maintenir. La page publique
+# (share.html, frontend statique) lit ce token en query string et n'appelle
+# que les routes /share/... ci-dessous, jamais les routes admin authentifiées.
+# --------------------------------------------------------------------------
+
+SHARE_ACCESS_TOKEN_TTL_S = 6 * 3600  # durée de vie du jeton d'accès (?at=) utilisé pour
+# les redirections stream/download : elles ne peuvent pas porter de header personnalisé
+# (balise <audio src=...>, téléchargement direct par clic du navigateur), donc le
+# contrôle de mot de passe se fait une fois sur GET /share/{token} (header
+# X-Share-Password), qui délivre ensuite ce jeton court à réutiliser en query string.
+
+
+def _share_new_id() -> str:
+    return uuid.uuid4().hex
+
+
+def _share_hash_password(password: str, salt: str) -> str:
+    return hashlib.sha256(f"{salt}:{password}".encode("utf-8")).hexdigest()
+
+
+def _share_make_access_token(share_id: str) -> str:
+    exp = int(time.time()) + SHARE_ACCESS_TOKEN_TTL_S
+    payload = f"{share_id}:{exp}"
+    sig = hmac.new(ADMIN_AUTH_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode(f"{payload}:{sig}".encode()).decode()
+
+
+def _share_verify_access_token(token: str, share_id: str) -> bool:
+    if not ADMIN_AUTH_SECRET or not token:
+        return False
+    try:
+        sid, exp, sig = base64.urlsafe_b64decode(token.encode()).decode().rsplit(":", 2)
+        if sid != share_id:
+            return False
+        expected = hmac.new(ADMIN_AUTH_SECRET.encode(), f"{sid}:{exp}".encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return False
+        return int(exp) >= int(time.time())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _share_target_exists(data: dict, target_type: str, target_id: str) -> bool:
+    if target_type == "track":
+        return target_id in data["tracks"]
+    if target_type == "project":
+        f = data["folders"].get(target_id)
+        return bool(f and f["kind"] in ("project", "playlist"))
+    return False
+
+
+def _share_collect_track_ids(data: dict, folder_id: str) -> list:
+    """Titres d'un projet ET de tous ses sous-projets imbriqués (le partage d'un
+    projet suit exactement ce qui est affiché dans renderProjectMixed côté
+    frontend), dédupliqués dans l'ordre de première rencontre — un même titre
+    peut se trouver dans plusieurs sous-projets à la fois."""
+    seen: list = []
+
+    def walk(fid: str):
+        for tid in data["folderTracks"].get(fid, []):
+            if tid not in seen:
+                seen.append(tid)
+        for child in data["folders"].values():
+            if child.get("parentId") == fid:
+                walk(child["id"])
+
+    walk(folder_id)
+    return seen
+
+
+def _share_target_track_ids(data: dict, share: dict) -> set:
+    if share["targetType"] == "track":
+        return {share["targetId"]}
+    return set(_share_collect_track_ids(data, share["targetId"]))
+
+
+def _share_project_artist_name(data: dict, folder: dict) -> Optional[str]:
+    """Remonte la chaîne de parents jusqu'au dossier artiste racine (kind="folder",
+    sans parent) pour afficher le nom de l'artiste sur la page publique."""
+    cur = folder
+    seen_ids = set()
+    while cur and cur.get("parentId") and cur["id"] not in seen_ids:
+        seen_ids.add(cur["id"])
+        cur = data["folders"].get(cur["parentId"])
+    return cur["name"] if cur else None
+
+
+def _share_public_track(track: dict) -> dict:
+    return {"id": track["id"], "title": track["title"], "artist": track["artist"]}
+
+
+def _share_admin_view(share: dict) -> dict:
+    """Vue admin d'un lien de partage : jamais le hash du mot de passe, juste s'il
+    y en a un ou non."""
+    v = {k: val for k, val in share.items() if k != "password"}
+    v["hasPassword"] = bool(share.get("password"))
+    v["url"] = f"{PUBLIC_SHARE_BASE_URL}/share.html?id={share['id']}"
+    return v
+
+
+class SCSharePermissions(BaseModel):
+    streaming: bool = True
+    downloadHQ: bool = False
+    trackInfo: bool = True
+
+
+class SCShareCreateBody(BaseModel):
+    targetType: str  # "track" | "project"
+    targetId: str
+    name: Optional[str] = None
+    permissions: Optional[SCSharePermissions] = None
+    password: Optional[str] = None
+
+
+class SCShareUpdateBody(BaseModel):
+    name: Optional[str] = None
+    enabled: Optional[bool] = None
+    permissions: Optional[SCSharePermissions] = None
+    password: Optional[str] = None  # nouveau mot de passe à définir
+    clearPassword: Optional[bool] = False  # true -> retire la protection existante
+
+
+@app.get("/soundconnect/shares", dependencies=[Depends(require_admin)])
+def soundconnect_list_shares(targetType: Optional[str] = None, targetId: Optional[str] = None):
+    data = _org_load()
+    shares = list(data.get("shares", {}).values())
+    if targetType:
+        shares = [s for s in shares if s["targetType"] == targetType]
+    if targetId:
+        shares = [s for s in shares if s["targetId"] == targetId]
+    shares.sort(key=lambda s: s.get("createdAt") or "", reverse=True)
+    return {"shares": [_share_admin_view(s) for s in shares]}
+
+
+@app.post("/soundconnect/shares", dependencies=[Depends(require_admin)])
+def soundconnect_create_share(body: SCShareCreateBody):
+    if body.targetType not in ("track", "project"):
+        raise HTTPException(status_code=400, detail="Type de partage invalide.")
+    data = _org_load()
+    if not _share_target_exists(data, body.targetType, body.targetId):
+        raise HTTPException(status_code=404, detail="Élément à partager introuvable.")
+    share_id = _share_new_id()
+    password_rec = None
+    if body.password:
+        salt = secrets.token_hex(8)
+        password_rec = {"salt": salt, "hash": _share_hash_password(body.password, salt)}
+    perms = (body.permissions or SCSharePermissions()).dict()
+    share = {
+        "id": share_id,
+        "targetType": body.targetType,
+        "targetId": body.targetId,
+        "name": (body.name or "").strip() or None,
+        "enabled": True,
+        "permissions": perms,
+        "password": password_rec,
+        "createdAt": _now_iso(),
+        "updatedAt": _now_iso(),
+    }
+    data.setdefault("shares", {})[share_id] = share
+    _org_save(data)
+    return _share_admin_view(share)
+
+
+@app.put("/soundconnect/shares/{share_id}", dependencies=[Depends(require_admin)])
+def soundconnect_update_share(share_id: str, body: SCShareUpdateBody):
+    data = _org_load()
+    share = data.get("shares", {}).get(share_id)
+    if not share:
+        raise HTTPException(status_code=404, detail="Lien de partage introuvable.")
+    if body.name is not None:
+        share["name"] = body.name.strip() or None
+    if body.enabled is not None:
+        share["enabled"] = body.enabled
+    if body.permissions is not None:
+        share["permissions"] = body.permissions.dict()
+    if body.clearPassword:
+        share["password"] = None
+    elif body.password:
+        salt = secrets.token_hex(8)
+        share["password"] = {"salt": salt, "hash": _share_hash_password(body.password, salt)}
+    share["updatedAt"] = _now_iso()
+    _org_save(data)
+    return _share_admin_view(share)
+
+
+@app.delete("/soundconnect/shares/{share_id}", dependencies=[Depends(require_admin)])
+def soundconnect_delete_share(share_id: str):
+    data = _org_load()
+    if share_id in data.get("shares", {}):
+        del data["shares"][share_id]
+        _org_save(data)
+    return {"deleted": True}
+
+
+# --- Endpoints publics (aucune auth admin — protection par mot de passe optionnel) ---
+
+
+def _share_get_enabled_or_404(data: dict, token: str) -> dict:
+    share = data.get("shares", {}).get(token)
+    if not share or not share.get("enabled", True):
+        raise HTTPException(status_code=404, detail="Ce lien n'existe pas ou a été désactivé.")
+    if not _share_target_exists(data, share["targetType"], share["targetId"]):
+        raise HTTPException(status_code=404, detail="Le contenu partagé n'existe plus.")
+    return share
+
+
+def _share_check_password(share: dict, provided: Optional[str]) -> bool:
+    pw = share.get("password")
+    if not pw:
+        return True
+    if not provided:
+        return False
+    return hmac.compare_digest(_share_hash_password(provided, pw["salt"]), pw["hash"])
+
+
+@app.get("/share/{token}")
+def share_public_view(token: str, x_share_password: str = Header(default="")):
+    data = _org_load()
+    share = _share_get_enabled_or_404(data, token)
+    if share.get("password") and not _share_check_password(share, x_share_password):
+        raise HTTPException(status_code=401, detail="Mot de passe requis ou incorrect.")
+    target_type = share["targetType"]
+    if target_type == "track":
+        track = data["tracks"][share["targetId"]]
+        title, artist = track["title"], track["artist"]
+        cover_url = f"/soundconnect/covers/track/{track['id']}"
+        track_ids = [track["id"]]
+        project_type = None
+    else:
+        folder = data["folders"][share["targetId"]]
+        title, artist = folder["name"], (_share_project_artist_name(data, folder) or "")
+        cover_url = f"/soundconnect/covers/folder/{folder['id']}"
+        track_ids = _share_collect_track_ids(data, folder["id"])
+        project_type = folder.get("projectType")
+    tracks = [_share_public_track(data["tracks"][tid]) for tid in track_ids if tid in data["tracks"]]
+    return {
+        "id": share["id"],
+        "name": share.get("name") or title,
+        "targetType": target_type,
+        "title": title,
+        "artist": artist,
+        "projectType": project_type,
+        "coverUrl": cover_url,
+        "tracks": tracks,
+        "permissions": share["permissions"],
+        "accessToken": _share_make_access_token(share["id"]),
+    }
+
+
+@app.get("/share/{token}/tracks/{track_id}/stream")
+def share_public_stream(token: str, track_id: str, at: str = ""):
+    data = _org_load()
+    share = _share_get_enabled_or_404(data, token)
+    if not share["permissions"].get("streaming", True):
+        raise HTTPException(status_code=403, detail="La lecture n'est pas activée pour ce lien.")
+    if not _share_verify_access_token(at, share["id"]):
+        raise HTTPException(status_code=401, detail="Accès expiré — recharge la page de partage.")
+    if track_id not in _share_target_track_ids(data, share):
+        raise HTTPException(status_code=404, detail="Ce titre ne fait pas partie de ce partage.")
+    track = data["tracks"].get(track_id)
+    fresh_url = _fresh_track_download_url(track) if track else None
+    if not fresh_url:
+        raise HTTPException(status_code=404, detail="Lien audio indisponible.")
+    return RedirectResponse(fresh_url)
+
+
+@app.get("/share/{token}/tracks/{track_id}/download")
+def share_public_download(token: str, track_id: str, at: str = ""):
+    data = _org_load()
+    share = _share_get_enabled_or_404(data, token)
+    if not share["permissions"].get("downloadHQ", False):
+        raise HTTPException(status_code=403, detail="Le téléchargement n'est pas activé pour ce lien.")
+    if not _share_verify_access_token(at, share["id"]):
+        raise HTTPException(status_code=401, detail="Accès expiré — recharge la page de partage.")
+    if track_id not in _share_target_track_ids(data, share):
+        raise HTTPException(status_code=404, detail="Ce titre ne fait pas partie de ce partage.")
+    track = data["tracks"].get(track_id)
+    fresh_url = _fresh_track_download_url(track) if track else None
+    if not fresh_url:
+        raise HTTPException(status_code=404, detail="Lien audio indisponible.")
+    return RedirectResponse(fresh_url)
