@@ -177,6 +177,12 @@ MAKE_BUDGET_URLS = {
 }
 BUDGET_LOGO_PATH = APP_DIR.parent / "assets" / "logo-white-bg.png"
 
+# Sound Connect — catalogue audio PHONO (voir section dédiée plus bas pour le détail).
+# Un seul scénario Make générique "liste le contenu d'un dossier SharePoint donné",
+# appelé récursivement par ce backend (pas de logique de parcours côté Make).
+MAKE_SOUNDCONNECT_LIST_FOLDER_URL = os.environ.get("MAKE_SOUNDCONNECT_LIST_FOLDER_URL", "")
+PHONO_ROOT_FOLDER_ID = "01B23DVXZSZKHPS7B5PBAJOCZHT5W3RGC5"
+
 # Analyse photo IA (préremplissage du formulaire d'ajout d'inventaire) — clé
 # API Anthropic à définir sur Render (Dashboard > service backend > Environment).
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -532,6 +538,39 @@ def get_flowstage_words(aesthetic_id: str, granularity: str, expected_duration_s
     return _whisperx_align_words(lines_abs, audio_path) or _interpolate_words(lines_abs)
 
 
+def get_flowstage_reference_text(aesthetic_id: str) -> str:
+    """Texte brut des paroles Flowstage d'une aesthetic, SANS tenir compte du garde-fou de durée
+    de get_flowstage_words() — utilisé comme `reference_lyrics` automatique quand l'aesthetic est
+    bien trouvée mais qu'aucun audio Flowstage ne correspond en durée à l'upload (cas réel
+    rencontré : un extrait TikTok de 32s pour un morceau Flowstage de 147s — le garde-fou rejette
+    à raison le TIMING de l'audio complet, mais le TEXTE, lui, reste juste et vaut la peine
+    d'être récupéré plutôt que jeté). On prend l'audio de plus longue durée (le plus souvent le
+    morceau complet plutôt qu'un extrait) et on renvoie ses lignes telles quelles, une par ligne
+    — à charge de correct_lyrics_with_claude() de n'aligner que les lignes qui correspondent
+    réellement à l'extrait transcrit. Renvoie "" si indisponible (jamais bloquant)."""
+    try:
+        r = requests.get(
+            f"{FLOWSTAGE_BASE_URL}/v1/aesthetics/{aesthetic_id}/audios",
+            headers={"X-API-Key": FLOWSTAGE_API_KEY},
+            timeout=20,
+        )
+        r.raise_for_status()
+        audios = r.json().get("audios", [])
+    except Exception as e:  # noqa: BLE001
+        print(f"[Flowstage] récupération texte de référence échouée: {e}")
+        return ""
+    if not audios:
+        return ""
+    best_audio = max(audios, key=lambda a: a.get("duration") or 0)
+    lines = []
+    for section in (best_audio or {}).get("sections", []):
+        for line in section.get("lines", []):
+            text = (line.get("text") or "").strip()
+            if text:
+                lines.append(text)
+    return "\n".join(lines)
+
+
 def _cache_timing(single_cle: str, granularity: str, words, source: str):
     conn = db()
     conn.execute(
@@ -628,6 +667,12 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
                     fs_words = _merge_apostrophe_words(fs_words)
                     _cache_timing(single_cle, granularity, fs_words, "flowstage")
                     return fs_words, "flowstage"
+                # Aesthetic trouvée mais timing Flowstage rejeté (durée ne colle pas — cas réel :
+                # extrait TikTok de 32s pour un morceau Flowstage de 147s). Le TEXTE reste juste,
+                # lui — on l'utilise comme référence automatique pour la correction Claude plutôt
+                # que de tout jeter (voir get_flowstage_reference_text).
+                if not reference_lyrics.strip():
+                    reference_lyrics = get_flowstage_reference_text(aesthetic["id"])
         # Upgrade paresseux : une entrée déjà en cache en "audio_uploade" (whisper brut, jamais
         # corrigé — soit un cache antérieur à l'ajout de la correction Claude, soit une tentative
         # de correction qui avait échoué à l'époque) est retentée maintenant si une clé Anthropic
@@ -655,6 +700,12 @@ def get_or_transcribe(single_cle: str, granularity: str, audio_path: Path, artis
                 words = _merge_apostrophe_words(words)
                 _cache_timing(single_cle, granularity, words, "flowstage")
                 return words, "flowstage"
+            # Aesthetic trouvée mais timing Flowstage rejeté (durée ne colle pas — cas réel :
+            # extrait TikTok de 32s pour un morceau Flowstage de 147s). Le TEXTE reste juste,
+            # lui — on l'utilise comme référence automatique pour la correction Claude plutôt
+            # que de tout jeter (voir get_flowstage_reference_text).
+            if not reference_lyrics.strip():
+                reference_lyrics = get_flowstage_reference_text(aesthetic["id"])
 
     words = transcribe(audio_path, granularity)
     words = _merge_apostrophe_words(words)
@@ -1818,3 +1869,182 @@ async def budget_delete_project(file_id: str, sheet_name: str, file_name: str, _
     new_data = be.workbook_to_bytes(wb)
     upload_result = _budget_upload(file_name, new_data)
     return {"deleted": True, "projects": wb.sheetnames, "upload": upload_result}
+
+
+# --------------------------------------------------------------------------
+# Onglet Sound Connect — catalogue audio PHONO (accessible à toute l'équipe,
+# pas sous /admin/, pas de require_admin)
+# --------------------------------------------------------------------------
+# Base de données = l'arborescence SharePoint PHONO (site "Partage Externe"),
+# organisée Artiste / Titre / versions (mix v1, v2, v3, instru, PBO...). Un
+# seul scénario Make générique ("DUCHESS SOUND CONNECT - LIST FOLDER") liste
+# le contenu d'un dossier donné par son itemId — c'est ce backend qui fait la
+# récursion Artiste -> Titre -> fichiers, et qui applique la règle métier de
+# Michel : pour chaque titre, ne garder QUE le mix le plus récent (numéro le
+# plus élevé après un "#") en 44kHz — jamais 48kHz, jamais INSTRU, jamais PBO.
+# Résultat mis en cache localement (le crawl complet fait ~1 appel Make par
+# artiste + ~1 par titre, soit plusieurs dizaines de secondes) : GET
+# /soundconnect/catalog sert ce cache, POST /soundconnect/sync le reconstruit.
+SOUNDCONNECT_CACHE_PATH = DATA_DIR / "soundconnect_catalog.json"
+
+# Un nom de fichier "44Khz" fait foi ; "44.1khz"/"44 khz" tolérés aussi. Tout
+# fichier INSTRU/PBO/ACAP est une variante technique, jamais LA version du titre.
+_SC_44KHZ_RE = re.compile(r"44[.,]?1?\s*khz", re.IGNORECASE)
+_SC_VERSION_NUM_RE = re.compile(r"#\s*(\d+)")
+_SC_EXCLUDE_RE = re.compile(r"instru|pbo|acap", re.IGNORECASE)
+_SC_AUDIO_EXT = (".wav", ".aiff", ".aif", ".flac", ".mp3")
+
+
+def _sc_list_folder(folder_id: str) -> list:
+    if not MAKE_SOUNDCONNECT_LIST_FOLDER_URL:
+        raise HTTPException(status_code=500, detail="MAKE_SOUNDCONNECT_LIST_FOLDER_URL n'est pas configurée côté serveur (Render > Environment).")
+    try:
+        r = requests.post(MAKE_SOUNDCONNECT_LIST_FOLDER_URL, json={"folderId": folder_id}, timeout=30)
+        r.raise_for_status()
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"Erreur de connexion à Make (Sound Connect) : {e}")
+    try:
+        items = r.json()
+    except ValueError:
+        raise HTTPException(status_code=502, detail="Réponse Make illisible (Sound Connect).")
+    # Dossier vide -> Make/SharePoint renvoie [{"id": null, ...}] plutôt que [] (piège connu, voir doc).
+    return [it for it in items if isinstance(it, dict) and it.get("id")]
+
+
+_SC_48KHZ_RE = re.compile(r"48\s*khz", re.IGNORECASE)
+
+
+def _sc_pick_best_version(files: list) -> Optional[dict]:
+    """Parmi les fichiers audio d'un dossier titre, choisit LA version à exposer.
+
+    Règle de Michel, en 3 paliers (le nommage réel du catalogue n'est pas homogène —
+    ex. "TW - Dernière Danse-24bits-M.wav" n'a ni "#NN" ni "44Khz" dans son nom, alors
+    que la grande majorité des titres suivent "TITRE #NN 44Khz 24Bit.wav") :
+      1. Strict  : 44kHz explicite, jamais instru/PBO/acap -> le numéro de mix le plus élevé.
+      2. Souple  : aucun 44kHz explicite trouvé -> tout fichier audio qui n'est ni marqué
+         48kHz ni instru/PBO/acap (évite de faire disparaître un titre du catalogue
+         juste parce qu'il ne suit pas la convention de nommage habituelle).
+      3. Dernier recours : uniquement des fichiers exclus/48kHz -> on prend quand même
+         le plus gros (souvent le master), avec confidence="unresolved" pour que le
+         front puisse le signaler visuellement à l'équipe plutôt que de le cacher.
+    """
+    audio = [f for f in files if (f.get("name") or "").lower().endswith(_SC_AUDIO_EXT)]
+    if not audio:
+        return None
+
+    def with_version(items):
+        out = []
+        for f in items:
+            m = _SC_VERSION_NUM_RE.search(f.get("name") or "")
+            out.append((int(m.group(1)) if m else -1, f))
+        out.sort(key=lambda c: c[0], reverse=True)
+        return out
+
+    strict = [f for f in audio if _SC_44KHZ_RE.search(f["name"]) and not _SC_EXCLUDE_RE.search(f["name"])]
+    if strict:
+        best = with_version(strict)[0][1]
+        return {**best, "versionConfidence": "strict"}
+
+    souple = [f for f in audio if not _SC_48KHZ_RE.search(f["name"]) and not _SC_EXCLUDE_RE.search(f["name"])]
+    if souple:
+        best = with_version(souple)[0][1]
+        return {**best, "versionConfidence": "fallback"}
+
+    best = max(audio, key=lambda f: f.get("size") or 0)
+    return {**best, "versionConfidence": "unresolved"}
+
+
+def _sc_build_catalog() -> dict:
+    catalog = []
+    unresolved_folders = []  # dossiers "titre" sans fichier audio exploitable (structure non standard)
+    artists = [it for it in _sc_list_folder(PHONO_ROOT_FOLDER_ID) if it.get("isFolder")]
+    for artist in artists:
+        titles = [it for it in _sc_list_folder(artist["id"]) if it.get("isFolder")]
+        for title in titles:
+            files = [it for it in _sc_list_folder(title["id"]) if not it.get("isFolder")]
+            best = _sc_pick_best_version(files)
+            if not best:
+                unresolved_folders.append({"artist": artist["name"], "title": title["name"], "fileCount": len(files)})
+                continue
+            catalog.append({
+                "id": best["id"],
+                "artist": artist["name"],
+                "title": title["name"],
+                "filename": best["name"],
+                "size": best.get("size"),
+                "downloadUrl": best.get("downloadUrl"),
+                "webUrl": best.get("webUrl"),
+                "lastModified": best.get("lastModifiedDateTime"),
+                "versionConfidence": best.get("versionConfidence", "strict"),
+            })
+    return {"tracks": catalog, "unresolvedFolders": unresolved_folders}
+
+
+def _sc_save_cache(payload: dict):
+    SOUNDCONNECT_CACHE_PATH.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    if R2_ENABLED:
+        # Le disque Render n'est pas persistant entre redéploiements (voir plus haut) : sans
+        # ceci, un redéploiement backend forcerait un nouveau sync complet (~1-2 min) avant que
+        # le catalogue ne réapparaisse. Best-effort : un échec R2 ne bloque jamais le sync,
+        # le cache local suffit tant que le conteneur ne redémarre pas.
+        try:
+            client = get_r2_client()
+            client.put_object(
+                Bucket=R2_BUCKET_NAME,
+                Key="soundconnect/catalog.json",
+                Body=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                ContentType="application/json",
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[R2] sauvegarde catalogue Sound Connect échouée : {e}")
+
+
+def _sc_load_cache() -> Optional[dict]:
+    if SOUNDCONNECT_CACHE_PATH.exists():
+        return json.loads(SOUNDCONNECT_CACHE_PATH.read_text(encoding="utf-8"))
+    if R2_ENABLED:
+        try:
+            client = get_r2_client()
+            obj = client.get_object(Bucket=R2_BUCKET_NAME, Key="soundconnect/catalog.json")
+            data = json.loads(obj["Body"].read().decode("utf-8"))
+            # Reconstruit le cache local pour éviter de retaper R2 à chaque requête.
+            SOUNDCONNECT_CACHE_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            return data
+        except Exception:  # noqa: BLE001 — pas de cache R2 = pas encore synchronisé, rien d'anormal
+            return None
+    return None
+
+
+@app.get("/soundconnect/catalog")
+def soundconnect_catalog():
+    data = _sc_load_cache()
+    if not data:
+        return {"tracks": [], "unresolvedFolders": [], "syncedAt": None, "needsSync": True}
+    return {
+        "tracks": data.get("tracks", []),
+        "unresolvedFolders": data.get("unresolvedFolders", []),
+        "syncedAt": data.get("syncedAt"),
+        "needsSync": False,
+    }
+
+
+@app.post("/soundconnect/sync")
+def soundconnect_sync():
+    # Synchrone et volontairement simple pour le V1 : un crawl complet de PHONO
+    # (~1 appel Make par artiste + ~1 par titre) prend de l'ordre de la minute.
+    # Déclenché à la demande (bouton "Rafraîchir" côté front), pas en arrière-plan
+    # pour l'instant — à revoir (job + polling, comme /jobs pour les sous-titres)
+    # si le catalogue grossit au point de dépasser le timeout du proxy Render.
+    result = _sc_build_catalog()
+    payload = {
+        "tracks": result["tracks"],
+        "unresolvedFolders": result["unresolvedFolders"],
+        "syncedAt": datetime.datetime.utcnow().isoformat() + "Z",
+    }
+    _sc_save_cache(payload)
+    return {
+        "synced": True,
+        "count": len(payload["tracks"]),
+        "unresolvedCount": len(payload["unresolvedFolders"]),
+        "syncedAt": payload["syncedAt"],
+    }

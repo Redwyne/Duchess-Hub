@@ -89,6 +89,12 @@ body[data-tab="srt"] {
   --accent-3: #0891b2;
   --accent-soft: rgba(20, 184, 166, 0.14);
 }
+body[data-tab="soundconnect"] {
+  --accent: #f59e0b;
+  --accent-2: #fcd34d;
+  --accent-3: #d97706;
+  --accent-soft: rgba(245, 158, 11, 0.14);
+}
 body[data-tab="strategie"] {
   --accent: #ec4899;
   --accent-2: #f9a8d4;
