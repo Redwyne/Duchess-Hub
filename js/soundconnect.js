@@ -1161,13 +1161,39 @@
     volumeIconBtn.setAttribute("aria-label", volumeIconBtn.title);
   }
 
+  // Le lien SharePoint mis en cache (t.downloadUrl, rempli au dernier
+  // "Rafraîchir PHONO") expire au bout d'environ 1h (token temporaire) — passé
+  // ce délai il renvoie 401 et le son ne démarre plus du tout. On tente d'abord
+  // ce lien en cache (rapide, marche la plupart du temps), et si le navigateur
+  // signale une erreur de chargement sur LE TITRE EN COURS, on retente une
+  // seule fois via /soundconnect/tracks/{id}/download, qui va rechercher un
+  // lien frais côté serveur avant de rediriger dessus (même mécanisme que le
+  // bouton Télécharger, qui lui n'a jamais eu ce problème).
+  let triedFreshForCurrent = false;
+
+  function freshDownloadUrl(trackId) {
+    return `${BACKEND_BASE_URL}/soundconnect/tracks/${encodeURIComponent(trackId)}/download`;
+  }
+
+  function loadAndPlay(t, { forceFresh } = {}) {
+    audioEl.src = forceFresh ? freshDownloadUrl(t.id) : (t.downloadUrl || freshDownloadUrl(t.id));
+    audioEl.play().catch(() => {});
+  }
+
+  audioEl.addEventListener("error", () => {
+    const t = currentQueue[currentIndex];
+    if (!t || triedFreshForCurrent) return;
+    triedFreshForCurrent = true;
+    loadAndPlay(t, { forceFresh: true });
+  });
+
   function playQueue(tracks, index) {
     currentQueue = tracks;
     currentIndex = index;
     const t = tracks[index];
     if (!t) return;
-    audioEl.src = t.downloadUrl;
-    audioEl.play().catch(() => {});
+    triedFreshForCurrent = false;
+    loadAndPlay(t);
     playerTitleEl.textContent = t.title;
     playerArtistEl.textContent = t.artist;
     playerArt.innerHTML = `<img src="${coverUrl("track", t.id)}" alt="" />`;
