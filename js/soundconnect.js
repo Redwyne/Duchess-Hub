@@ -263,7 +263,56 @@
       el.addEventListener("click", () => gotoBreadcrumb(i));
     });
     applyLabelTheme();
+    pushScHistory();
   }
+
+  // ---------------------------------------------------------------------
+  // Bouton précédent/suivant du navigateur = naviguer dans les dossiers
+  // ---------------------------------------------------------------------
+  // Chaque vue (Home / Search / Espace / Dossier·Projet) pousse une entrée
+  // d'historique contenant tout le breadcrumbStack — pas besoin de rejouer des
+  // appels réseau pour reconstruire la vue au popstate, l'état est déjà là.
+  // suppressScHistoryPush évite de ré-empiler une entrée quand on est en train
+  // de RESTAURER une vue suite à un clic précédent/suivant (sinon chaque
+  // retour arrière recréerait une entrée en avant, cassant le bouton retour).
+  let suppressScHistoryPush = false;
+  function sameScView(a, b) {
+    return !!a && !!b && a.type === b.type && a.id === b.id;
+  }
+  function pushScHistory() {
+    if (suppressScHistoryPush) return;
+    const cur = history.state;
+    const newLast = breadcrumbStack[breadcrumbStack.length - 1];
+    const curLast = cur && cur.scView ? cur.scView[cur.scView.length - 1] : null;
+    try {
+      if (sameScView(curLast, newLast)) {
+        // Même vue qu'avant (ex. réouverture du même dossier) : on remplace
+        // plutôt que d'empiler, pour ne pas polluer l'historique de doublons.
+        history.replaceState({ scView: breadcrumbStack, tab: "soundconnect" }, "", "#soundconnect");
+      } else {
+        history.pushState({ scView: breadcrumbStack, tab: "soundconnect" }, "", "#soundconnect");
+      }
+    } catch (e) {}
+  }
+  window.addEventListener("popstate", (e) => {
+    const state = e.state;
+    if (!state || !state.scView) return; // pas une vue Sound Connect : on laisse faire (retour normal du navigateur)
+    if (document.body.getAttribute("data-tab") !== "soundconnect") {
+      const btn = document.querySelector('.tab-btn[data-tab-target="soundconnect"]');
+      if (btn) btn.click(); // active l'onglet — tabs.js fait au passage un replaceState(null, ...)
+    }
+    suppressScHistoryPush = true;
+    const stack = state.scView;
+    const last = stack[stack.length - 1];
+    if (last.type === "home") showHome();
+    else if (last.type === "search") showSearch();
+    else if (last.type === "workspace") showWorkspace(last.id, last.name);
+    else if (last.type === "folder") showFolder(last.id, last.name, stack.slice(0, -1));
+    suppressScHistoryPush = false;
+    // tabs.js a pu remettre le state à null en activant l'onglet ci-dessus —
+    // on le restaure pour que d'éventuels aller-retours suivants restent cohérents.
+    try { history.replaceState({ scView: breadcrumbStack, tab: "soundconnect" }, "", "#soundconnect"); } catch (e) {}
+  });
 
   // Fond + palette d'accent qui suivent l'espace (librairie) actif : ARK et
   // THEORY ont leur propre logo/couleur, DUCHESS (et Home/Search) gardent
@@ -446,6 +495,30 @@
   function pickableProjects() { return allFoldersFlat.filter((f) => f.kind === "project" || f.kind === "playlist"); }
   function pickableArtistFolders() { return allFoldersFlat.filter((f) => f.kind === "folder"); }
 
+  // true si candidateId EST ancestorId, ou se trouve à l'intérieur de lui —
+  // sert à interdire de déplacer un projet dans lui-même ou dans l'un de ses
+  // propres sous-projets (ce qui créerait une boucle sans fin), maintenant que
+  // les projets peuvent être imbriqués les uns dans les autres (comme des
+  // dossiers dans un Finder).
+  function isDescendantOrSelf(candidateId, ancestorId) {
+    let cur = findFlatFolder(candidateId);
+    while (cur) {
+      if (cur.id === ancestorId) return true;
+      cur = cur.parentId ? findFlatFolder(cur.parentId) : null;
+    }
+    return false;
+  }
+
+  // Cibles valides pour "Déplacer « projet » vers…" : un artiste, OU un autre
+  // projet (imbrication façon Finder) — jamais le projet lui-même ni l'un de
+  // ses propres sous-projets.
+  function pickableProjectTargets(excludeId) {
+    return allFoldersFlat.filter((f) => {
+      if (f.kind !== "folder" && f.kind !== "project" && f.kind !== "playlist") return false;
+      return !isDescendantOrSelf(f.id, excludeId);
+    });
+  }
+
   // ---------------------------------------------------------------------
   // Actions de réorganisation partagées par le drag and drop ET le menu clic droit
   // ---------------------------------------------------------------------
@@ -462,6 +535,10 @@
   }
 
   async function moveProjectToFolder(projectId, folderId, workspaceId, targetName) {
+    if (isDescendantOrSelf(folderId, projectId)) {
+      flashToast("Impossible : ce projet est déjà à l'intérieur de celui-ci.");
+      return;
+    }
     try {
       await fetchJSON(`/soundconnect/folders/${projectId}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
@@ -557,7 +634,7 @@
   }
 
   function openPickerForMoveProjectToFolder(id, name) {
-    openPicker(`Déplacer « ${name} » vers…`, pickableArtistFolders(), (target) => moveProjectToFolder(id, target.id, target.workspaceId, target.name));
+    openPicker(`Déplacer « ${name} » vers…`, pickableProjectTargets(id), (target) => moveProjectToFolder(id, target.id, target.workspaceId, target.name));
   }
 
   // ---------------------------------------------------------------------
@@ -667,6 +744,10 @@
     });
     workspaceListEl.querySelectorAll('.sc-tree-row[data-tree-kind="project"]').forEach((row) => {
       attachDropTarget(row, "track", (payload) => addTrackToFolder(payload.id, row.dataset.id, row.dataset.name));
+      // Un projet glissé sur un autre projet s'imbrique dedans (comme un
+      // dossier dans un dossier sur Finder) — moveProjectToFolder refuse déjà
+      // toute boucle (drop sur soi-même ou sur l'un de ses propres sous-projets).
+      attachDropTarget(row, "project", (payload) => moveProjectToFolder(payload.id, row.dataset.id, row.dataset.workspaceId, row.dataset.name));
     });
   }
 
@@ -700,19 +781,20 @@
       </div>`;
   }
 
-  function renderTileGrid(folders, { onTileClick }) {
+  function renderTileGrid(folders, { onTileClick, container, emptyTitle, emptySub }) {
+    const target = container || contentEl;
     if (!folders.length) {
-      contentEl.innerHTML = emptyStateHtml("Rien ici pour l'instant.", "Utilise les boutons en haut à droite pour créer un dossier ou un projet.");
+      target.innerHTML = emptyStateHtml(emptyTitle || "Rien ici pour l'instant.", emptySub || "Utilise les boutons en haut à droite pour créer un dossier ou un projet.");
       return;
     }
-    contentEl.innerHTML = `<div class="sc-tile-grid">${folders.map((f) => {
+    target.innerHTML = `<div class="sc-tile-grid">${folders.map((f) => {
       const typeLabel = f.projectType && PROJECT_TYPE_LABELS[f.projectType] ? PROJECT_TYPE_LABELS[f.projectType] + " · " : "";
       const meta = f.childCount
         ? `${f.childCount} élément${f.childCount > 1 ? "s" : ""}`
         : `${typeLabel}${f.trackCount} titre${f.trackCount > 1 ? "s" : ""}`;
       return tileHtml({ id: f.id, name: f.name, kind: f.kind, coverKind: "folder", meta, showPlay: f.trackCount > 0 && f.childCount === 0 });
     }).join("")}</div>`;
-    contentEl.querySelectorAll(".sc-tile").forEach((el) => {
+    target.querySelectorAll(".sc-tile").forEach((el) => {
       el.addEventListener("click", (e) => {
         if (e.target.closest(".sc-tile-play") || e.target.closest(".sc-cover-edit-btn")) return;
         onTileClick(el.dataset.id, el.dataset.name);
@@ -724,7 +806,7 @@
         getFolderDetailCached(el.dataset.id).catch(() => {});
       });
     });
-    contentEl.querySelectorAll(".sc-tile-play").forEach((btn) => {
+    target.querySelectorAll(".sc-tile-play").forEach((btn) => {
       btn.addEventListener("click", async (e) => {
         e.stopPropagation();
         try {
@@ -734,9 +816,10 @@
       });
     });
     // Drag and drop : un dossier artiste se glisse dans un espace (sidebar), un
-    // projet/playlist se glisse dans un dossier artiste (sidebar) — voir attachDropTarget
-    // côté arbre sidebar. Clic droit = équivalent accessible sans glisser-déposer.
-    contentEl.querySelectorAll('.sc-tile[data-kind="folder"]').forEach((el) => {
+    // projet/playlist se glisse dans un dossier artiste OU dans un autre projet
+    // (sidebar, ou directement tuile sur tuile ici) — voir attachDropTarget.
+    // Clic droit = équivalent accessible sans glisser-déposer.
+    target.querySelectorAll('.sc-tile[data-kind="folder"]').forEach((el) => {
       attachDragSource(el, { type: "folder", id: el.dataset.id });
       el.addEventListener("contextmenu", (e) => {
         e.preventDefault();
@@ -748,12 +831,19 @@
         ]);
       });
     });
-    contentEl.querySelectorAll('.sc-tile[data-kind="project"], .sc-tile[data-kind="playlist"]').forEach((el) => {
+    target.querySelectorAll('.sc-tile[data-kind="project"], .sc-tile[data-kind="playlist"]').forEach((el) => {
       attachDragSource(el, { type: "project", id: el.dataset.id });
+      // Un projet déposé directement sur une autre tuile-projet du même écran
+      // s'imbrique dedans — exactement comme glisser un dossier sur un autre
+      // dossier dans le Finder, sans avoir besoin de passer par la sidebar.
+      attachDropTarget(el, "project", (payload) => {
+        const targetFolder = findFlatFolder(el.dataset.id);
+        moveProjectToFolder(payload.id, el.dataset.id, targetFolder ? targetFolder.workspaceId : undefined, el.dataset.name);
+      });
       el.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         showContextMenu(e.clientX, e.clientY, [
-          { label: "Déplacer vers un artiste…", onClick: () => openPickerForMoveProjectToFolder(el.dataset.id, el.dataset.name) },
+          { label: "Déplacer vers…", onClick: () => openPickerForMoveProjectToFolder(el.dataset.id, el.dataset.name) },
           { label: "Renommer…", onClick: () => quickRenameFolder(el.dataset.id, el.dataset.name) },
           { sep: true },
           { label: "Supprimer", danger: true, onClick: () => quickDeleteFolder(el.dataset.id) },
@@ -822,7 +912,9 @@
       return;
     }
     const workspaceId = detail.folder.workspaceId;
-    if (detail.children.length > 0) {
+    const isArtist = detail.folder.kind === "folder";
+    if (isArtist && detail.children.length > 0) {
+      // Dossier artiste : ses enfants sont des projets, jamais de titres directs.
       setTopbarActions(`
         <button type="button" class="sc-btn" id="sc-newFolderTop">+ Nouveau dossier</button>
         <button type="button" class="sc-btn" id="sc-newPlaylistTop">+ Nouveau projet</button>
@@ -832,7 +924,7 @@
       document.getElementById("sc-newPlaylistTop").addEventListener("click", () => openProjectTypeModal({ workspaceId, parentId: id }));
       document.getElementById("sc-deleteFolderTop").addEventListener("click", () => deleteFolder(id, parentBreadcrumb));
       renderTileGrid(detail.children, { onTileClick: (fid, fname) => showFolder(fid, fname, breadcrumbStack) });
-    } else {
+    } else if (isArtist) {
       setTopbarActions(`
         <button type="button" class="sc-btn" id="sc-renameTop">Renommer</button>
         <button type="button" class="sc-btn" id="sc-deleteFolderTop" title="Supprimer">🗑 Supprimer</button>
@@ -840,6 +932,19 @@
       document.getElementById("sc-renameTop").addEventListener("click", () => renameFolder(id, name, parentBreadcrumb));
       document.getElementById("sc-deleteFolderTop").addEventListener("click", () => deleteFolder(id, parentBreadcrumb));
       renderProjectDetail(detail);
+    } else {
+      // Projet/playlist : peut contenir à la fois des sous-projets imbriqués
+      // (glissés dedans, façon Finder) ET ses propres titres — les deux sont
+      // affichés ensemble, jamais l'un au détriment de l'autre.
+      setTopbarActions(`
+        <button type="button" class="sc-btn" id="sc-renameTop">Renommer</button>
+        <button type="button" class="sc-btn" id="sc-newPlaylistTop">+ Nouveau projet</button>
+        <button type="button" class="sc-btn" id="sc-deleteFolderTop" title="Supprimer">🗑 Supprimer</button>
+      `);
+      document.getElementById("sc-renameTop").addEventListener("click", () => renameFolder(id, name, parentBreadcrumb));
+      document.getElementById("sc-newPlaylistTop").addEventListener("click", () => openProjectTypeModal({ workspaceId, parentId: id }));
+      document.getElementById("sc-deleteFolderTop").addEventListener("click", () => deleteFolder(id, parentBreadcrumb));
+      renderProjectMixed(detail, breadcrumbStack);
     }
   }
 
@@ -863,6 +968,39 @@
       <button type="button" class="sc-add-tracks-btn" id="sc-addTracksBtn">+ Ajouter des titres</button>
       <div class="sc-track-list" id="sc-projectTracks"></div>
     `;
+    document.getElementById("sc-addTracksBtn").addEventListener("click", () => openAddModal(f.id));
+    renderTrackList(document.getElementById("sc-projectTracks"), tracks, { removable: true, folderId: f.id });
+  }
+
+  // Comme renderProjectDetail, mais pour un projet qui peut aussi contenir des
+  // sous-projets imbriqués (glissés dedans) — affiche les deux à la fois :
+  // la grille des sous-projets en haut (si présents), les titres en dessous.
+  function renderProjectMixed(detail, breadcrumbForChildren) {
+    const f = detail.folder;
+    const children = detail.children || [];
+    const tracks = detail.tracks || [];
+    const metaParts = [folderKindLabel(f)];
+    if (children.length) metaParts.push(`${children.length} sous-projet${children.length > 1 ? "s" : ""}`);
+    metaParts.push(`${tracks.length} titre${tracks.length > 1 ? "s" : ""}`);
+    contentEl.innerHTML = `
+      <div class="sc-detail-head">
+        <div class="sc-detail-cover">${coverBlockHtml("folder", f.id)}</div>
+        <div class="sc-detail-info">
+          <h2>${escapeHtml(f.name)}</h2>
+          <div class="sc-detail-meta">${metaParts.join(" · ")}</div>
+        </div>
+      </div>
+      ${children.length ? `<div class="sc-subsection-label">Sous-projets</div><div id="sc-projectChildren"></div>` : ""}
+      <div class="sc-subsection-label">Titres</div>
+      <button type="button" class="sc-add-tracks-btn" id="sc-addTracksBtn">+ Ajouter des titres</button>
+      <div class="sc-track-list" id="sc-projectTracks"></div>
+    `;
+    if (children.length) {
+      renderTileGrid(children, {
+        container: document.getElementById("sc-projectChildren"),
+        onTileClick: (fid, fname) => showFolder(fid, fname, breadcrumbForChildren),
+      });
+    }
     document.getElementById("sc-addTracksBtn").addEventListener("click", () => openAddModal(f.id));
     renderTrackList(document.getElementById("sc-projectTracks"), tracks, { removable: true, folderId: f.id });
   }
