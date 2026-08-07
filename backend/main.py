@@ -179,11 +179,15 @@ ADMIN_AUTH_SECRET = os.environ.get("ADMIN_AUTH_SECRET", "")
 ADMIN_USERS_JSON = os.environ.get("ADMIN_USERS", "[]")
 ADMIN_TOKEN_TTL_S = 20 * 60  # 20 min
 
-# Base publique du frontend statique, utilisée pour construire l'URL complète
-# d'un lien de partage externe (Sound Connect) renvoyée à l'admin. Le frontend
-# réellement actif a été vérifié en direct (duchess-hub.netlify.app renvoie
-# 404) : c'est bien le service Render qui sert le site.
-PUBLIC_SHARE_BASE_URL = os.environ.get("PUBLIC_SHARE_BASE_URL", "https://duchess-hub-front.onrender.com")
+# Base publique de la page de partage externe (Sound Connect) — un service
+# Render STATIQUE SÉPARÉ de duchess-hub-front (root directory "public-share/"
+# dans le même repo), volontairement sur un autre sous-domaine sans aucun lien
+# ni ressource partagée avec le site interne. Raison : un destinataire qui
+# tronque l'URL reçue (ex. il ne garde que le domaine) ne doit JAMAIS retomber
+# sur le Hub interne (Pitch/Admin/Sound Connect...) — seulement sur cette page
+# de partage minimaliste, qui n'affiche rien sans un ?id= valide. Variable
+# d'env pour permettre un futur domaine personnalisé sans redéploiement du code.
+PUBLIC_SHARE_BASE_URL = os.environ.get("PUBLIC_SHARE_BASE_URL", "https://duchess-share.onrender.com")
 
 MAKE_INVENTAIRE_URLS = {
     "list": os.environ.get("MAKE_INVENTAIRE_LIST_URL", ""),
@@ -224,6 +228,7 @@ ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 ALLOWED_ORIGINS = [
     "https://duchess-hub-front.onrender.com",
     "https://duchess-hub.netlify.app",  # ancien hébergement, gardé au cas où
+    "https://duchess-share.onrender.com",  # page publique de partage externe, service Render séparé (voir PUBLIC_SHARE_BASE_URL)
     "http://localhost:8888",
     "http://127.0.0.1:8888",
 ]
@@ -2982,7 +2987,7 @@ def _share_admin_view(share: dict) -> dict:
     y en a un ou non."""
     v = {k: val for k, val in share.items() if k != "password"}
     v["hasPassword"] = bool(share.get("password"))
-    v["url"] = f"{PUBLIC_SHARE_BASE_URL}/share.html?id={share['id']}"
+    v["url"] = f"{PUBLIC_SHARE_BASE_URL}/?id={share['id']}"
     return v
 
 
