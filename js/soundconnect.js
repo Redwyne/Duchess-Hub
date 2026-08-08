@@ -1670,8 +1670,49 @@
     return `${BACKEND_BASE_URL}/soundconnect/tracks/${encodeURIComponent(trackId)}/download`;
   }
 
+  // ---------------------------------------------------------------------
+  // Pré-chargement du titre SUIVANT dans une file de lecture (projet) — pour
+  // un démarrage quasi instantané au clic "suivant"/à la fin naturelle du
+  // titre courant. Différent de la tentative précédente (retirée plus haut
+  // dans ce fichier, voir le commentaire à ce sujet) : ici on télécharge le
+  // fichier entier dans un Blob totalement séparé de la lecture en cours —
+  // jamais un second <audio> pointant sur la même URL que celle réellement
+  // lue, donc aucune interférence possible avec la lecture active. Le Blob
+  // n'est utilisé comme source réelle qu'une fois prêt ET seulement au
+  // moment de jouer CE titre ; s'il n'est pas prêt à temps (connexion lente),
+  // on retombe simplement sur le chemin normal (lien direct/frais), sans
+  // jamais bloquer ni casser la lecture.
+  const preloadCache = new Map(); // trackId -> { blobUrl: string|null }
+  const preloadOrder = []; // limite la mémoire vive utilisée (WAV/FLAC entiers)
+
+  function schedulePreload(trackId) {
+    if (!trackId || preloadCache.has(trackId)) return;
+    const entry = { blobUrl: null };
+    preloadCache.set(trackId, entry);
+    preloadOrder.push(trackId);
+    while (preloadOrder.length > 2) {
+      const oldId = preloadOrder.shift();
+      const old = preloadCache.get(oldId);
+      if (old && old.blobUrl) URL.revokeObjectURL(old.blobUrl);
+      preloadCache.delete(oldId);
+    }
+    fetch(freshDownloadUrl(trackId))
+      .then((r) => (r.ok ? r.blob() : Promise.reject()))
+      .then((blob) => {
+        if (!preloadCache.has(trackId)) return; // évincé entre-temps (file très rapide)
+        entry.blobUrl = URL.createObjectURL(blob);
+      })
+      .catch(() => {}); // échec silencieux : le titre se chargera normalement le moment venu
+  }
+
+  function consumePreload(trackId) {
+    const entry = preloadCache.get(trackId);
+    return entry && entry.blobUrl ? entry.blobUrl : null;
+  }
+
   function loadAndPlay(t, { forceFresh } = {}) {
-    audioEl.src = forceFresh ? freshDownloadUrl(t.id) : (t.downloadUrl || freshDownloadUrl(t.id));
+    const preloaded = !forceFresh ? consumePreload(t.id) : null;
+    audioEl.src = preloaded || (forceFresh ? freshDownloadUrl(t.id) : (t.downloadUrl || freshDownloadUrl(t.id)));
     audioEl.play().catch(() => {});
   }
 
@@ -1695,6 +1736,8 @@
     renderWaveform(t);
     player.classList.remove("hidden");
     updatePlayingHighlight();
+    const next = tracks[index + 1];
+    if (next) schedulePreload(next.id);
   }
 
   function togglePlayPause() {

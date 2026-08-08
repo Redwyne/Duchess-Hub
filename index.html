@@ -17,6 +17,9 @@
 <title>Duchess · Hub</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Backend Sound Connect : préconnecte tôt (DNS+TLS) pour raccourcir la
+     latence du tout premier clic lecture/téléchargement de la session. -->
+<link rel="preconnect" href="https://duchess-hub.onrender.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=Poppins:wght@700;800&family=Playfair+Display:wght@600;700&family=Bebas+Neue&family=Montserrat:wght@700;800&family=Anton&family=Oswald:wght@600;700&family=Roboto+Condensed:wght@700&family=Archivo+Black&family=Bangers&family=Righteous&family=Luckiest+Guy&family=Caveat:wght@600;700&family=Permanent+Marker&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 <link rel="stylesheet" href="css/calendar.css">
@@ -821,7 +824,7 @@
 </div>
 
 <div class="sc-player hidden" id="sc-player">
-  <audio id="sc-audio" preload="none"></audio>
+  <audio id="sc-audio" preload="auto"></audio>
   <div class="sc-player-left">
     <div class="sc-player-art" id="sc-playerArt">♪</div>
     <div class="sc-player-text">
