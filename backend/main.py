@@ -2952,35 +2952,42 @@ def soundconnect_get_cover(kind: str, entity_id: str):
 
 
 def _cover_process_upload(raw: bytes) -> tuple:
-    """Normalise toute image uploadée : auto-rotation EXIF, recadrage à une
-    taille raisonnable (max 1600px) et recompression — pour ne plus jamais
-    dépendre du poids d'origine (photo de téléphone, export Canva/Photoshop non
-    optimisé, etc.) et garder des fichiers légers pour le montage 2x2. Renvoie
-    (bytes, ext, content_type). Lève ValueError si l'image est illisible."""
-    from PIL import Image, ImageOps
+    """Normalise toute image uploadée via ffmpeg (déjà utilisé ailleurs dans ce
+    backend pour Sous-titres, donc disponible sur Render) : redimensionne à
+    1600px max (aucun agrandissement, aspect conservé, rotation EXIF respectée)
+    et recompresse en JPEG léger — jamais un rejet pour poids d'origine, juste
+    une réduction. ffmpeg lit aussi des formats que Pillow ne sait pas décoder
+    (HEIC export iPhone notamment). Renvoie (bytes, ext, content_type). Lève
+    ValueError si le fichier est illisible même par ffmpeg."""
     import io as _io
+    import tempfile
 
+    has_alpha = False
     try:
-        img = Image.open(_io.BytesIO(raw))
-        img = ImageOps.exif_transpose(img)
-    except Exception as e:  # noqa: BLE001
-        raise ValueError("Format d'image non reconnu — exporte en JPEG ou PNG et réessaie.") from e
+        from PIL import Image
+        probe = Image.open(_io.BytesIO(raw))
+        has_alpha = probe.mode in ("RGBA", "LA") or (probe.mode == "P" and "transparency" in probe.info)
+    except Exception:  # noqa: BLE001 — Pillow ne sait pas lire ce format (ex. HEIC), ffmpeg tentera quand même
+        pass
 
-    has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
-    w, h = img.size
-    max_dim = 1600
-    scale = min(1.0, max_dim / max(w, h))
-    if scale < 1.0:
-        img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
-
-    buf = _io.BytesIO()
-    if has_alpha:
-        img = img.convert("RGBA")
-        img.save(buf, format="PNG", optimize=True)
-        return buf.getvalue(), ".png", "image/png"
-    img = img.convert("RGB")
-    img.save(buf, format="JPEG", quality=88)
-    return buf.getvalue(), ".jpg", "image/jpeg"
+    ext_out, content_type = (".png", "image/png") if has_alpha else (".jpg", "image/jpeg")
+    with tempfile.TemporaryDirectory() as tmp:
+        in_path = Path(tmp) / "in"
+        out_path = Path(tmp) / f"out{ext_out}"
+        in_path.write_bytes(raw)
+        cmd = [
+            "ffmpeg", "-y", "-i", str(in_path),
+            "-frames:v", "1",
+            "-vf", "scale='min(1600,iw)':'min(1600,ih)':force_original_aspect_ratio=decrease",
+        ]
+        if ext_out == ".jpg":
+            cmd += ["-q:v", "3"]  # qualité ffmpeg JPEG (échelle 2-5, 3 = très bon rendu, fichier léger)
+        cmd += [str(out_path)]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=60)
+            return out_path.read_bytes(), ext_out, content_type
+        except Exception as e:  # noqa: BLE001
+            raise ValueError("Format d'image non reconnu — exporte en JPEG ou PNG et réessaie.") from e
 
 
 @app.post("/soundconnect/covers/{kind}/{entity_id}")
@@ -2991,8 +2998,10 @@ async def soundconnect_upload_cover(kind: str, entity_id: str, file: UploadFile 
     if _cover_entity_name(data, kind, entity_id) is None:
         raise HTTPException(status_code=404, detail="Élément introuvable.")
     raw = await file.read()
-    if len(raw) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Image trop lourde (20 Mo max).")
+    if len(raw) > 100 * 1024 * 1024:
+        # Garde-fou anti-abus uniquement — ffmpeg réduit ensuite n'importe quelle image
+        # réelle (photo, export Canva/Photoshop...) sans jamais rejeter pour le poids.
+        raise HTTPException(status_code=400, detail="Fichier trop lourd (100 Mo max).")
     try:
         processed, ext, content_type = _cover_process_upload(raw)
     except ValueError as e:
