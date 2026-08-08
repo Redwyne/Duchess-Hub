@@ -878,6 +878,15 @@
       <h3 id="sc-newModalTitle">Nouveau dossier</h3>
       <button type="button" class="sc-modal-close" id="sc-newModalClose">✕</button>
     </div>
+    <div class="sc-new-cover-picker hidden" id="sc-newModalCoverWrap">
+      <button type="button" class="sc-new-cover-btn" id="sc-newModalCoverBtn">
+        <span class="sc-new-cover-preview" id="sc-newModalCoverPreview">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg>
+        </span>
+        <span class="sc-new-cover-label" id="sc-newModalCoverLabel">Choisir une cover (obligatoire)</span>
+      </button>
+      <input type="file" accept="image/*" id="sc-newModalCoverInput" style="display:none" />
+    </div>
     <input type="text" id="sc-newModalName" placeholder="Nom…" />
     <button type="button" class="sc-btn sc-btn-primary" id="sc-newModalConfirm">Créer</button>
   </div>

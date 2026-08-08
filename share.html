@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Duchess · Partage</title>
+<meta name="theme-color" content="#0b0b0f">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/share.css">
+</head>
+<body>
+
+<div class="shr-bg" id="shr-bg" aria-hidden="true"></div>
+<div class="shr-noise" aria-hidden="true"></div>
+
+<!-- État : chargement -->
+<div class="shr-state" id="shr-loading">
+  <div class="shr-spinner"></div>
+</div>
+
+<!-- État : lien invalide / expiré / désactivé -->
+<div class="shr-state hidden" id="shr-error">
+  <div class="shr-error-card">
+    <div class="shr-error-icon">✕</div>
+    <h1>Lien introuvable</h1>
+    <p id="shr-error-text">Ce lien de partage n'existe plus ou a été désactivé.</p>
+  </div>
+</div>
+
+<!-- État : protection par mot de passe -->
+<div class="shr-state hidden" id="shr-gate">
+  <form class="shr-gate-card" id="shr-gate-form">
+    <div class="shr-gate-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>
+    </div>
+    <h1>Contenu protégé</h1>
+    <p>Entre le mot de passe fourni pour accéder à ce partage.</p>
+    <input type="password" id="shr-gate-password" placeholder="Mot de passe" autocomplete="off" autofocus>
+    <button type="submit" class="shr-btn-primary" id="shr-gate-submit">Accéder</button>
+    <div class="shr-gate-error hidden" id="shr-gate-error">Mot de passe incorrect.</div>
+  </form>
+</div>
+
+<!-- État : contenu -->
+<main class="shr-page hidden" id="shr-page">
+
+  <section class="shr-hero">
+    <div class="shr-hero-cover-wrap">
+      <img class="shr-hero-cover" id="shr-cover" src="" alt="">
+      <div class="shr-hero-cover-glow" id="shr-cover-glow" aria-hidden="true"></div>
+    </div>
+    <div class="shr-hero-text">
+      <div class="shr-hero-kicker" id="shr-kicker">Partagé par Duchess</div>
+      <h1 class="shr-hero-title" id="shr-title">—</h1>
+      <div class="shr-hero-artist" id="shr-artist"></div>
+      <div class="shr-hero-meta" id="shr-meta"></div>
+      <div class="shr-hero-actions">
+        <button type="button" class="shr-btn-primary shr-btn-play-all" id="shr-playAllBtn">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>
+          <span>Écouter</span>
+        </button>
+        <button type="button" class="shr-btn-ghost hidden" id="shr-downloadAllBtn">Télécharger tout</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="shr-tracklist-wrap">
+    <div class="shr-tracklist" id="shr-tracklist"></div>
+  </section>
+
+  <footer class="shr-footer">
+    <span>Propulsé par</span>
+    <span class="shr-footer-brand">DUCHESS</span>
+  </footer>
+
+</main>
+
+<!-- Lecteur fixe -->
+<div class="shr-player hidden" id="shr-player">
+  <div class="shr-player-inner">
+    <img class="shr-player-cover" id="shr-player-cover" src="" alt="">
+    <div class="shr-player-info">
+      <div class="shr-player-title" id="shr-player-title">—</div>
+      <div class="shr-player-artist" id="shr-player-artist"></div>
+    </div>
+    <button type="button" class="shr-player-btn shr-player-prev" id="shr-player-prev" aria-label="Précédent">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM20 6l-9 6 9 6z"></path></svg>
+    </button>
+    <button type="button" class="shr-player-btn shr-player-play" id="shr-player-play" aria-label="Lecture/Pause">
+      <svg id="shr-player-play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg>
+    </button>
+    <button type="button" class="shr-player-btn shr-player-next" id="shr-player-next" aria-label="Suivant">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 6h2v12h-2zM4 6l9 6-9 6z"></path></svg>
+    </button>
+    <div class="shr-player-time" id="shr-player-time-current">0:00</div>
+    <input type="range" class="shr-player-seek" id="shr-player-seek" min="0" max="1000" value="0">
+    <div class="shr-player-time" id="shr-player-time-total">0:00</div>
+    <button type="button" class="shr-player-btn shr-player-download hidden" id="shr-player-download" aria-label="Télécharger">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+    </button>
+  </div>
+</div>
+
+<audio id="shr-audio" preload="none"></audio>
+
+<script src="js/share.js"></script>
+</body>
+</html>

@@ -63,6 +63,12 @@
   const newModalClose = document.getElementById("sc-newModalClose");
   const newModalName = document.getElementById("sc-newModalName");
   const newModalConfirm = document.getElementById("sc-newModalConfirm");
+  const newModalCoverWrap = document.getElementById("sc-newModalCoverWrap");
+  const newModalCoverBtn = document.getElementById("sc-newModalCoverBtn");
+  const newModalCoverInput = document.getElementById("sc-newModalCoverInput");
+  const newModalCoverPreview = document.getElementById("sc-newModalCoverPreview");
+  const newModalCoverLabel = document.getElementById("sc-newModalCoverLabel");
+  let newModalCoverFile = null;
 
   const projectTypeModal = document.getElementById("sc-projectTypeModal");
   const projectTypeModalClose = document.getElementById("sc-projectTypeModalClose");
@@ -237,14 +243,18 @@
     fd.append("file", file);
     try {
       const r = await fetch(coverUrl(target.kind, target.id), { method: "POST", body: fd });
-      if (!r.ok) throw new Error("upload échoué");
+      if (!r.ok) {
+        let detail = "";
+        try { detail = (await r.json()).detail || ""; } catch (_) { /* ignore */ }
+        throw new Error(detail || "upload échoué");
+      }
       const data = await r.json();
       const freshUrl = BACKEND_BASE_URL + data.coverUrl;
       document
         .querySelectorAll(`[data-cover-kind="${target.kind}"][data-cover-id="${CSS.escape(target.id)}"] .sc-cover-img`)
         .forEach((img) => { img.src = freshUrl; });
     } catch (e) {
-      alert("Échec de l'upload de la cover — réessaie dans un instant.");
+      alert(e.message && e.message !== "upload échoué" ? e.message : "Échec de l'upload de la cover — réessaie dans un instant.");
     }
   });
 
@@ -1286,15 +1296,37 @@
 
   const PROJECT_TYPE_LABELS = { single: "Single", ep: "EP", album: "Album" };
 
+  function resetNewModalCover() {
+    newModalCoverFile = null;
+    newModalCoverInput.value = "";
+    newModalCoverBtn.classList.remove("has-file");
+    newModalCoverLabel.textContent = "Choisir une cover (obligatoire)";
+    newModalCoverPreview.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><path d="M21 15l-5-5L5 21"></path></svg>`;
+  }
+
   function openNewModal(mode, ctx) {
     newModalMode = mode;
     newModalCtx = ctx;
     newModalTitle.textContent = ctx.title || "Nouveau";
     newModalName.value = ctx.prefill || "";
+    resetNewModalCover();
+    newModalCoverWrap.classList.toggle("hidden", mode !== "project");
     newModal.classList.remove("hidden");
     newModalName.focus();
   }
   function closeNewModal() { newModal.classList.add("hidden"); }
+
+  newModalCoverBtn.addEventListener("click", () => newModalCoverInput.click());
+  newModalCoverInput.addEventListener("change", () => {
+    const file = newModalCoverInput.files[0];
+    if (!file) return;
+    newModalCoverFile = file;
+    newModalCoverBtn.classList.add("has-file");
+    newModalCoverLabel.textContent = file.name;
+    const reader = new FileReader();
+    reader.onload = () => { newModalCoverPreview.innerHTML = `<img src="${reader.result}" alt="" />`; };
+    reader.readAsDataURL(file);
+  });
 
   newModalClose.addEventListener("click", closeNewModal);
   newModal.addEventListener("click", (e) => { if (e.target === newModal) closeNewModal(); });
@@ -1325,6 +1357,10 @@
   newModalConfirm.addEventListener("click", async () => {
     const name = newModalName.value.trim();
     if (!name) return;
+    if (newModalMode === "project" && !newModalCoverFile) {
+      alert("Choisis une cover pour le projet avant de le créer.");
+      return;
+    }
     try {
       invalidateFolderCache();
       if (newModalMode === "workspace") {
@@ -1333,13 +1369,31 @@
         await loadSidebar();
         showHome();
       } else if (newModalMode === "folder" || newModalMode === "project") {
-        await fetchJSON("/soundconnect/folders", {
+        const created = await fetchJSON("/soundconnect/folders", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             workspaceId: newModalCtx.workspaceId, parentId: newModalCtx.parentId, name,
             kind: newModalMode, projectType: newModalMode === "project" ? newModalCtx.projectType : null,
           }),
         });
+        if (newModalMode === "project" && newModalCoverFile) {
+          try {
+            const fd = new FormData();
+            fd.append("file", newModalCoverFile);
+            const r = await fetch(coverUrl("folder", created.id), { method: "POST", body: fd });
+            if (!r.ok) {
+              let detail = "";
+              try { detail = (await r.json()).detail || ""; } catch (_) { /* ignore */ }
+              throw new Error(detail || "Échec de l'upload de la cover.");
+            }
+          } catch (coverErr) {
+            // On ne laisse jamais un projet sans cover : on annule sa création.
+            try { await fetchJSON(`/soundconnect/folders/${created.id}`, { method: "DELETE" }); } catch (_) { /* ignore */ }
+            invalidateFolderCache();
+            alert(`${coverErr.message} Le projet n'a pas été créé — réessaie.`);
+            return;
+          }
+        }
         closeNewModal();
         if (newModalCtx.parentId) {
           showFolder(newModalCtx.parentId, "", breadcrumbStack.slice(0, -1)); // nom réel repris via fetch

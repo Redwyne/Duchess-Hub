@@ -2797,14 +2797,14 @@ def _cover_local_file(kind: str, entity_id: str) -> Optional[Path]:
     return matches[0] if matches else None
 
 
-@app.get("/soundconnect/covers/{kind}/{entity_id}")
-def soundconnect_get_cover(kind: str, entity_id: str):
-    if kind not in COVER_KINDS:
-        raise HTTPException(status_code=404, detail="Type de cover inconnu.")
+def _cover_raw_bytes(kind: str, entity_id: str) -> Optional[tuple]:
+    """Renvoie (bytes, media_type) si une cover a été uploadée pour cette entité
+    (fichier local, ou repli R2 avec mise en cache locale au passage), sinon None.
+    Ne génère jamais de placeholder — c'est le rôle de _resolve_cover()."""
     local = _cover_local_file(kind, entity_id)
     if local:
         media_type = mimetypes.guess_type(local.name)[0] or "application/octet-stream"
-        return Response(content=local.read_bytes(), media_type=media_type, headers={"Cache-Control": "public, max-age=3600"})
+        return local.read_bytes(), media_type
     if R2_ENABLED:
         try:
             client = get_r2_client()
@@ -2814,16 +2814,173 @@ def soundconnect_get_cover(kind: str, entity_id: str):
                     body = obj["Body"].read()
                     (COVERS_DIR / f"{kind}_{entity_id}{ext}").write_bytes(body)
                     media_type = mimetypes.guess_type(ext)[0] or "application/octet-stream"
-                    return Response(content=body, media_type=media_type, headers={"Cache-Control": "public, max-age=3600"})
+                    return body, media_type
                 except Exception:  # noqa: BLE001 — pas cette extension, tente la suivante
                     continue
         except Exception:  # noqa: BLE001 — R2 indisponible, on retombe sur le placeholder
             pass
-    data = _org_load()
+    return None
+
+
+def _cover_track_parent_folder(data: dict, track_id: str) -> Optional[str]:
+    """Un titre appartient normalement à un seul dossier/projet — on retrouve ce
+    parent via folderTracks (pas de référence directe stockée sur le titre)."""
+    for fid, track_ids in data["folderTracks"].items():
+        if track_id in track_ids:
+            return fid
+    return None
+
+
+def _cover_placeholder_tile(seed: str, label: str, size: int = 512):
+    """Version PIL (raster, pas SVG) du même visuel dégradé + initiales, utilisée
+    comme tuile dans un montage composite (impossible de composer une image
+    raster à partir de SVG sans dépendance de rasterisation supplémentaire)."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    h = 0
+    for ch in seed or "":
+        h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+    hue1 = h % 360
+    hue2 = (hue1 + 46) % 360
+    c1 = tuple(int(round(x * 255)) for x in colorsys.hls_to_rgb(hue1 / 360.0, 0.40, 0.58))
+    c2 = tuple(int(round(x * 255)) for x in colorsys.hls_to_rgb(hue2 / 360.0, 0.24, 0.58))
+    img = Image.new("RGB", (size, size), c1)
+    # dégradé diagonal simple : mélange linéaire coin haut-gauche -> bas-droit
+    px = img.load()
+    for y in range(size):
+        t = y / max(1, size - 1)
+        row = tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
+        for x in range(size):
+            px[x, y] = row
+    draw = ImageDraw.Draw(img)
+    initials = _cover_initials(label)
+    font_size = int(size * 0.34)
+    try:
+        font = ImageFont.load_default(size=font_size)
+    except TypeError:
+        font = ImageFont.load_default()
+    bbox = draw.textbbox((0, 0), initials, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text(((size - tw) / 2 - bbox[0], (size - th) / 2 - bbox[1]), initials, font=font, fill=(255, 255, 255))
+    return img
+
+
+def _cover_tile_image(kind: str, entity_id: str, label: str, size: int = 512):
+    """Image PIL carrée (recadrée/redimensionnée) pour une tuile de montage :
+    la vraie cover uploadée si elle existe, sinon un placeholder dégradé+initiales."""
+    from PIL import Image
+    import io as _io
+
+    raw = _cover_raw_bytes(kind, entity_id)
+    if raw:
+        try:
+            img = Image.open(_io.BytesIO(raw[0])).convert("RGB")
+            w, h = img.size
+            side = min(w, h)
+            img = img.crop(((w - side) // 2, (h - side) // 2, (w - side) // 2 + side, (h - side) // 2 + side))
+            return img.resize((size, size), Image.LANCZOS)
+        except Exception:  # noqa: BLE001 — fichier corrompu, on retombe sur le placeholder
+            pass
+    return _cover_placeholder_tile(entity_id, label, size)
+
+
+def _cover_montage_png(children: list, size: int = 512) -> bytes:
+    """Grille 2x2 façon 'dossier' Spotify/Apple Music : jusqu'à 4 covers des
+    projets enfants, dans l'ordre existant ; les cases restantes (si <4 enfants)
+    sont laissées en fond neutre plutôt que remplies artificiellement."""
+    from PIL import Image
+    import io as _io
+
+    canvas = Image.new("RGB", (size, size), (30, 30, 34))
+    half = size // 2
+    positions = [(0, 0), (half, 0), (0, half), (half, half)]
+    for (x, y), child in zip(positions, children[:4]):
+        tile = _cover_tile_image("folder", child["id"], child["name"], half)
+        canvas.paste(tile, (x, y))
+    buf = _io.BytesIO()
+    canvas.save(buf, format="PNG", optimize=True)
+    return buf.getvalue()
+
+
+def _resolve_cover(data: dict, kind: str, entity_id: str, _depth: int = 0) -> tuple:
+    """Point d'entrée unique pour résoudre la cover d'une entité Sound Connect :
+    1) une vraie cover uploadée pour CETTE entité gagne toujours ;
+    2) sinon, pour un titre : on hérite de la cover de son projet parent ;
+    3) sinon, pour un dossier artiste (kind="folder", pas "project") qui a des
+       enfants : montage 2x2 des covers de ces projets ;
+    4) sinon : le placeholder dégradé + initiales généré à la volée (SVG, léger).
+    Renvoie (bytes, media_type)."""
+    raw = _cover_raw_bytes(kind, entity_id)
+    if raw:
+        return raw
+
+    if kind == "track" and _depth < 4:
+        parent_id = _cover_track_parent_folder(data, entity_id)
+        if parent_id and parent_id in data["folders"]:
+            return _resolve_cover(data, "folder", parent_id, _depth + 1)
+
+    if kind == "folder":
+        f = data["folders"].get(entity_id)
+        if f is None:
+            raise HTTPException(status_code=404, detail="Élément introuvable.")
+        if f.get("kind") == "folder":
+            children = sorted(
+                (c for c in data["folders"].values() if c.get("parentId") == entity_id),
+                key=lambda c: c.get("sortOrder", 0),
+            )
+            if children:
+                return _cover_montage_png(children), "image/png"
+        return _cover_svg(entity_id, f["name"]), "image/svg+xml"
+
     name = _cover_entity_name(data, kind, entity_id)
     if name is None:
         raise HTTPException(status_code=404, detail="Élément introuvable.")
-    return Response(content=_cover_svg(entity_id, name), media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=300"})
+    return _cover_svg(entity_id, name), "image/svg+xml"
+
+
+@app.get("/soundconnect/covers/{kind}/{entity_id}")
+def soundconnect_get_cover(kind: str, entity_id: str):
+    if kind not in COVER_KINDS:
+        raise HTTPException(status_code=404, detail="Type de cover inconnu.")
+    data = _org_load()
+    body, media_type = _resolve_cover(data, kind, entity_id)
+    # Cache court pour tout ce qui est généré à la volée (placeholder ou montage,
+    # qui peuvent changer dès qu'un enfant change de cover), long pour un vrai upload.
+    is_generated = _cover_local_file(kind, entity_id) is None
+    cache = "public, max-age=300" if is_generated else "public, max-age=3600"
+    return Response(content=body, media_type=media_type, headers={"Cache-Control": cache})
+
+
+def _cover_process_upload(raw: bytes) -> tuple:
+    """Normalise toute image uploadée : auto-rotation EXIF, recadrage à une
+    taille raisonnable (max 1600px) et recompression — pour ne plus jamais
+    dépendre du poids d'origine (photo de téléphone, export Canva/Photoshop non
+    optimisé, etc.) et garder des fichiers légers pour le montage 2x2. Renvoie
+    (bytes, ext, content_type). Lève ValueError si l'image est illisible."""
+    from PIL import Image, ImageOps
+    import io as _io
+
+    try:
+        img = Image.open(_io.BytesIO(raw))
+        img = ImageOps.exif_transpose(img)
+    except Exception as e:  # noqa: BLE001
+        raise ValueError("Format d'image non reconnu — exporte en JPEG ou PNG et réessaie.") from e
+
+    has_alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+    w, h = img.size
+    max_dim = 1600
+    scale = min(1.0, max_dim / max(w, h))
+    if scale < 1.0:
+        img = img.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+
+    buf = _io.BytesIO()
+    if has_alpha:
+        img = img.convert("RGBA")
+        img.save(buf, format="PNG", optimize=True)
+        return buf.getvalue(), ".png", "image/png"
+    img = img.convert("RGB")
+    img.save(buf, format="JPEG", quality=88)
+    return buf.getvalue(), ".jpg", "image/jpeg"
 
 
 @app.post("/soundconnect/covers/{kind}/{entity_id}")
@@ -2834,22 +2991,23 @@ async def soundconnect_upload_cover(kind: str, entity_id: str, file: UploadFile 
     if _cover_entity_name(data, kind, entity_id) is None:
         raise HTTPException(status_code=404, detail="Élément introuvable.")
     raw = await file.read()
-    if len(raw) > 8 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="Image trop lourde (8 Mo max).")
-    ext = mimetypes.guess_extension((file.content_type or "").split(";")[0].strip()) or Path(file.filename or "").suffix or ".jpg"
-    if ext == ".jpe":
-        ext = ".jpg"
+    if len(raw) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image trop lourde (20 Mo max).")
+    try:
+        processed, ext, content_type = _cover_process_upload(raw)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     for old in COVERS_DIR.glob(f"{kind}_{entity_id}.*"):
         old.unlink(missing_ok=True)
-    (COVERS_DIR / f"{kind}_{entity_id}{ext}").write_bytes(raw)
+    (COVERS_DIR / f"{kind}_{entity_id}{ext}").write_bytes(processed)
     if R2_ENABLED:
         try:
             client = get_r2_client()
             client.put_object(
                 Bucket=R2_BUCKET_NAME,
                 Key=_cover_r2_key(kind, entity_id, ext),
-                Body=raw,
-                ContentType=file.content_type or "application/octet-stream",
+                Body=processed,
+                ContentType=content_type,
             )
         except Exception as e:  # noqa: BLE001
             print(f"[R2] sauvegarde cover Sound Connect échouée : {e}")
