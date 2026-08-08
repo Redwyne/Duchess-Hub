@@ -6,6 +6,11 @@
    lecteur embarqué.
    ========================================================================= */
 
+/* Palette d'accent = EXACTEMENT celle de Sound Connect (voir body[data-sc-label]
+   dans css/style.css) : ambre par défaut (DUCHESS), néon jaune-vert pour ARK,
+   violet profond pour THEORY — appliquée selon body[data-share-label], reçu du
+   backend (/share/{token} -> labelSlug) à partir du workspace d'origine du
+   partage. Un lien ARK a donc, au pixel près, la même identité que dans l'app. */
 :root {
   --bg: #0b0b0f;
   --panel: #16161d;
@@ -15,9 +20,10 @@
   --text: #f5f5f8;
   --muted: #9c9ca8;
   --muted-2: #6c6c78;
-  --accent: #5b7cfa;
-  --accent-2: #8f6ffb;
-  --accent-3: #4fd1c5;
+  --accent: #f59e0b;
+  --accent-2: #fcd34d;
+  --accent-3: #d97706;
+  --accent-soft: rgba(245, 158, 11, 0.16);
   --radius-lg: 24px;
   --radius-md: 16px;
   --radius-sm: 10px;
@@ -25,6 +31,19 @@
   --font-body: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
   color-scheme: dark;
   accent-color: var(--accent);
+  transition: color .3s ease;
+}
+body[data-share-label="ark"] {
+  --accent: #dbf613;
+  --accent-2: #e9fa6c;
+  --accent-3: #afc606;
+  --accent-soft: rgba(219, 246, 19, 0.14);
+}
+body[data-share-label="theory"] {
+  --accent: #3801de;
+  --accent-2: #7c50fe;
+  --accent-3: #2800a1;
+  --accent-soft: rgba(56, 1, 222, 0.16);
 }
 
 * { box-sizing: border-box; }
@@ -51,7 +70,7 @@ button { font-family: inherit; }
 }
 .shr-bg::after {
   content: ""; position: absolute; inset: 0;
-  background: radial-gradient(ellipse at 50% -10%, rgba(91,124,250,.25), transparent 60%), linear-gradient(180deg, rgba(11,11,15,.4), var(--bg) 85%);
+  background: radial-gradient(ellipse at 50% -10%, var(--accent-soft), transparent 60%), linear-gradient(180deg, rgba(11,11,15,.4), var(--bg) 85%);
 }
 .shr-noise {
   position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: .04; mix-blend-mode: overlay;
@@ -80,7 +99,7 @@ button { font-family: inherit; }
 .shr-error-card p, .shr-gate-card p { color: var(--muted); font-size: 13.5px; margin: 0 0 4px; line-height: 1.5; }
 
 .shr-gate-icon {
-  width: 52px; height: 52px; margin: 0 auto 16px; border-radius: 50%; background: rgba(91,124,250,.15); color: var(--accent);
+  width: 52px; height: 52px; margin: 0 auto 16px; border-radius: 50%; background: var(--accent-soft); color: var(--accent);
   display: flex; align-items: center; justify-content: center;
 }
 .shr-gate-icon svg { width: 24px; height: 24px; }
@@ -94,11 +113,11 @@ button { font-family: inherit; }
 
 .shr-btn-primary {
   margin-top: 12px; border: none; border-radius: 99px; padding: 12px 22px; font-size: 14px; font-weight: 700;
-  color: #fff; cursor: pointer; background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  box-shadow: 0 12px 30px -10px rgba(91,124,250,.6); transition: transform .15s ease, box-shadow .15s ease;
+  color: #0b0b0d; cursor: pointer; background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 12px 30px -10px var(--accent-soft); transition: transform .15s ease, box-shadow .15s ease;
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
 }
-.shr-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 16px 36px -10px rgba(91,124,250,.7); }
+.shr-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 16px 36px -10px var(--accent-soft); }
 .shr-btn-primary:active { transform: translateY(0); }
 .shr-btn-primary svg { width: 16px; height: 16px; }
 .shr-btn-ghost {
@@ -123,7 +142,10 @@ button { font-family: inherit; }
 }
 .shr-hero-text { flex: 1; min-width: 240px; }
 .shr-hero-kicker {
-  font-size: 11.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-3);
+  /* accent-2 plutôt que accent-3 : sur le thème Theory, accent-3 (#2800a1) est
+     un violet quasi noir, illisible en petit texte sur le fond sombre — accent-2
+     reste clair et lisible dans les trois thèmes (ARK/DUCHESS/THEORY). */
+  font-size: 11.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-2);
   margin-bottom: 10px;
 }
 .shr-hero-title {
@@ -141,21 +163,45 @@ button { font-family: inherit; }
   background: rgba(22,22,29,.55); backdrop-filter: blur(20px) saturate(1.3); -webkit-backdrop-filter: blur(20px) saturate(1.3);
   border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 10px; box-shadow: 0 30px 70px -30px rgba(0,0,0,.6);
 }
+/* Numéro de piste par défaut -> icône play au survol/lecture (comme
+   Spotify/Apple Music), remplacée par un mini égaliseur animé pendant que LE
+   son de cette piste joue réellement (pas juste "chargée en pause") — même
+   logique que .sc-track-eq dans Sound Connect. Mini cover par ligne (identique
+   pour toutes puisque chaque titre hérite désormais de la cover de son projet,
+   voir backend _resolve_cover) pour renforcer l'identité visuelle en un coup d'œil. */
 .shr-track {
-  display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 14px;
-  padding: 12px 14px; border-radius: var(--radius-md); cursor: pointer; transition: background .12s ease;
+  display: grid; grid-template-columns: 26px 34px 1fr auto; align-items: center; gap: 12px;
+  padding: 10px 14px; border-radius: var(--radius-md); cursor: pointer; transition: background .12s ease;
 }
 .shr-track:hover { background: rgba(255,255,255,.04); }
-.shr-track.shr-track-playing { background: rgba(91,124,250,.12); }
-.shr-track-playbtn {
-  width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); background: var(--sunken); color: var(--text);
-  display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; position: relative;
-  transition: border-color .15s, background .15s;
+.shr-track.shr-track-playing { background: var(--accent-soft); }
+.shr-track-index-cell { width: 26px; height: 26px; flex-shrink: 0; position: relative; display: flex; align-items: center; justify-content: center; }
+.shr-track-index { font-size: 12.5px; color: var(--muted-2); font-variant-numeric: tabular-nums; }
+.shr-track-index-playbtn {
+  display: none; width: 26px; height: 26px; border-radius: 50%; align-items: center; justify-content: center;
+  background: var(--accent); color: #0b0b0d; border: none; cursor: pointer; position: absolute; inset: 0;
 }
-.shr-track-playbtn svg { width: 15px; height: 15px; }
-.shr-track:hover .shr-track-playbtn, .shr-track-playing .shr-track-playbtn { border-color: var(--accent); background: var(--accent); color: #fff; }
+.shr-track-index-playbtn svg { width: 12px; height: 12px; }
+.shr-track:hover .shr-track-index { display: none; }
+.shr-track:hover .shr-track-index-playbtn { display: flex; }
+.shr-track-playing .shr-track-index { display: none; }
+.shr-track-playing .shr-track-index-playbtn { display: flex; }
+.shr-track-index-eq { display: none; align-items: flex-end; justify-content: center; gap: 2px; width: 13px; height: 12px; color: #0b0b0d; }
+.shr-track-playing.shr-track-audio-playing .shr-track-index-playbtn .shr-track-index-icon { display: none; }
+.shr-track-playing.shr-track-audio-playing .shr-track-index-playbtn .shr-track-index-eq { display: flex; }
+.shr-track-index-eq i { display: block; width: 2.5px; border-radius: 1px; background: currentColor; height: 35%; animation: shr-eq-bounce .85s ease-in-out infinite; }
+.shr-track-index-eq i:nth-child(1) { animation-delay: -0.55s; }
+.shr-track-index-eq i:nth-child(2) { animation-delay: -0.25s; }
+.shr-track-index-eq i:nth-child(3) { animation-delay: -0.75s; }
+@keyframes shr-eq-bounce { 0%, 100% { height: 30%; } 50% { height: 100%; } }
+@media (prefers-reduced-motion: reduce) { .shr-track-index-eq i { animation: none; height: 65%; } }
+.shr-track-cover {
+  width: 34px; height: 34px; border-radius: 8px; object-fit: cover; flex-shrink: 0;
+  box-shadow: 0 4px 10px -4px rgba(0,0,0,.5);
+}
 .shr-track-info { min-width: 0; }
 .shr-track-title { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shr-track-playing .shr-track-title { color: var(--accent-2); }
 .shr-track-sub { font-size: 12px; color: var(--muted-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
 .shr-track-action {
   width: 34px; height: 34px; border-radius: 50%; border: none; background: transparent; color: var(--muted);
@@ -173,49 +219,111 @@ button { font-family: inherit; }
 }
 .shr-footer-brand { font-family: var(--font-head); font-weight: 700; color: var(--muted); letter-spacing: .1em; }
 
-/* ---------------- Lecteur fixe ---------------- */
+/* ---------------- Lecteur fixe (repris à l'identique de Sound Connect,
+   voir .sc-player dans css/soundconnect.css : même disposition 3 colonnes,
+   même silhouette de waveform bg/fg + input range invisible par-dessus, même
+   groupe volume avec la formule calc() du thumb, mêmes proportions de bouton
+   de lecture en dégradé — pour que le lien public donne exactement la même
+   sensation que l'outil interne). ---------------- */
 
 .shr-player {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; padding: 12px 18px calc(12px + env(safe-area-inset-bottom));
-  background: rgba(14,14,18,.75); backdrop-filter: blur(24px) saturate(1.4); -webkit-backdrop-filter: blur(24px) saturate(1.4);
-  border-top: 1px solid var(--border);
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; padding: 12px 22px calc(12px + env(safe-area-inset-bottom));
+  background: rgba(14,14,18,.82); backdrop-filter: blur(24px) saturate(1.4); -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border-top: 1px solid var(--border); box-shadow: 0 -12px 30px -14px rgba(0,0,0,.5);
 }
-.shr-player-inner { max-width: 920px; margin: 0 auto; display: flex; align-items: center; gap: 14px; }
-.shr-player-cover { width: 42px; height: 42px; border-radius: 8px; object-fit: cover; flex-shrink: 0; }
-.shr-player-info { min-width: 0; width: 140px; flex-shrink: 0; }
+.shr-player-inner {
+  max-width: 1040px; margin: 0 auto; display: grid; grid-template-columns: 200px 1fr 170px; align-items: center; gap: 20px;
+}
+.shr-player-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.shr-player-cover { width: 44px; height: 44px; border-radius: 10px; object-fit: cover; flex-shrink: 0; box-shadow: 0 6px 16px -6px rgba(0,0,0,.5); }
+.shr-player-info { min-width: 0; }
 .shr-player-title { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shr-player-artist { font-size: 11.5px; color: var(--muted-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shr-player-btn { background: none; border: none; color: var(--text); cursor: pointer; width: 30px; height: 30px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; }
-.shr-player-btn:hover { background: rgba(255,255,255,.08); }
-.shr-player-btn svg { width: 16px; height: 16px; }
-.shr-player-play { width: 38px; height: 38px; background: var(--text); color: var(--bg); }
-.shr-player-play:hover { background: var(--accent); color: #fff; }
-.shr-player-play svg { width: 15px; height: 15px; }
-.shr-player-time { font-size: 11px; color: var(--muted-2); font-variant-numeric: tabular-nums; width: 34px; text-align: center; flex-shrink: 0; }
-.shr-player-seek { flex: 1; min-width: 60px; }
-.shr-player-download { color: var(--muted); }
 
-/* Curseur de lecture — accent-color pour navigateurs modernes, fallback webkit/moz sinon */
+.shr-player-center { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+.shr-player-transport { display: flex; align-items: center; gap: 18px; }
+.shr-player-btn { background: none; border: none; color: var(--muted); cursor: pointer; width: 30px; height: 30px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 50%; transition: color .15s ease, transform .12s ease; }
+.shr-player-btn:hover { color: var(--text); transform: translateY(-1px); }
+.shr-player-btn svg { width: 16px; height: 16px; }
+.shr-player-play {
+  width: 36px; height: 36px; color: #0b0b0d; background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  box-shadow: 0 8px 18px -8px var(--accent-soft); transition: transform .12s ease, box-shadow .12s ease;
+}
+.shr-player-play:hover { transform: scale(1.07) translateY(0); color: #0b0b0d; box-shadow: 0 10px 22px -6px var(--accent-soft); }
+.shr-player-play svg { width: 15px; height: 15px; }
+.shr-player-progress { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 680px; }
+.shr-player-time { font-size: 10.5px; color: var(--muted-2); width: 32px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.shr-player-time:last-child { text-align: right; }
+
+/* Waveform : silhouette générée puis vraie analyse RMS (Web Audio API),
+   exactement le même js/soundconnect.js:renderWaveform + cache (voir
+   js/share.js) — deux rangées de barres identiques superposées (fond en
+   sourdine, avant-plan en accent) découpées via clip-path selon --progress,
+   avec l'input range natif invisible par-dessus pour le drag/clic/clavier. */
+.shr-player-waveform { position: relative; flex: 1; height: 40px; display: flex; align-items: center; }
+.shr-player-waveform-row { position: absolute; inset: 0; display: flex; align-items: center; gap: 1px; pointer-events: none; }
+.shr-player-waveform-row--bg { color: var(--border); }
+.shr-player-waveform-row--fg { color: var(--accent); clip-path: inset(0 calc(100% - var(--progress, 0%)) 0 0); }
+.shr-wave-bar { flex: 1; min-width: 1px; border-radius: 1.5px; background: currentColor; transition: background-color .15s ease; }
+.shr-player-waveform:hover .shr-player-waveform-row--bg { color: var(--muted-2); }
+.shr-player-waveform:has(#shr-player-seek:focus-visible) { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+
 input[type="range"].shr-player-seek {
-  -webkit-appearance: none; appearance: none; height: 4px; border-radius: 99px; background: var(--border); cursor: pointer;
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
+  -webkit-appearance: none; appearance: none; background: transparent; outline: none; cursor: pointer;
 }
-input[type="range"].shr-player-seek::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); cursor: pointer;
-  box-shadow: 0 0 0 3px rgba(91,124,250,.25);
+input[type="range"].shr-player-seek::-webkit-slider-thumb { -webkit-appearance: none; width: 1px; height: 1px; background: transparent; }
+input[type="range"].shr-player-seek::-moz-range-thumb { width: 1px; height: 1px; background: transparent; border: none; }
+input[type="range"].shr-player-seek::-moz-range-track { background: transparent; border: none; }
+
+.shr-player-right { display: flex; align-items: center; gap: 12px; justify-content: flex-end; }
+.shr-volume-group { display: flex; align-items: center; gap: 8px; }
+.shr-volume-icon {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%; background: none; border: none; color: var(--muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; transition: color .15s ease, background .15s ease;
 }
-input[type="range"].shr-player-seek::-moz-range-thumb {
-  width: 12px; height: 12px; border: none; border-radius: 50%; background: var(--accent); cursor: pointer;
-  box-shadow: 0 0 0 3px rgba(91,124,250,.25);
+.shr-volume-icon:hover { color: var(--text); background: rgba(255,255,255,.06); }
+.shr-volume-icon svg { width: 16px; height: 16px; }
+input[type="range"].shr-volume {
+  --thumb: 13px;
+  -webkit-appearance: none; appearance: none; width: 84px; height: 5px; border-radius: 99px; outline: none; cursor: pointer;
+  background: linear-gradient(to right,
+    var(--accent) 0 calc((100% - var(--thumb)) * var(--pct, 100) / 100 + (var(--thumb) / 2)),
+    var(--border) calc((100% - var(--thumb)) * var(--pct, 100) / 100 + (var(--thumb) / 2)) 100%);
 }
-input[type="range"].shr-player-seek::-moz-range-progress { background: var(--accent); height: 4px; border-radius: 99px; }
+input[type="range"].shr-volume::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--text); border: none; box-sizing: border-box;
+  box-shadow: 0 0 0 2px rgba(14,14,18,.9), 0 1px 5px rgba(0,0,0,.35); cursor: pointer; transition: transform .12s ease;
+}
+input[type="range"].shr-volume:hover::-webkit-slider-thumb, input[type="range"].shr-volume:active::-webkit-slider-thumb { transform: scale(1.15); }
+input[type="range"].shr-volume::-moz-range-thumb { width: 13px; height: 13px; border-radius: 50%; background: var(--text); border: none; box-shadow: 0 0 0 2px rgba(14,14,18,.9); cursor: pointer; }
+input[type="range"].shr-volume::-moz-range-track { background: var(--border); height: 5px; border-radius: 99px; }
+input[type="range"].shr-volume::-moz-range-progress { background: var(--accent); height: 5px; border-radius: 99px; }
+.shr-player-download { color: var(--muted); flex-shrink: 0; }
+.shr-player-download:hover { color: var(--text); }
+
+/* ---------------- Micro-animations d'entrée ---------------- */
+
+.shr-page { animation: shr-fade-up .5s ease both; }
+@keyframes shr-fade-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.shr-track { animation: shr-fade-up .4s ease both; }
+@media (prefers-reduced-motion: reduce) { .shr-page, .shr-track { animation: none; } }
 
 /* ---------------- Responsive ---------------- */
 
+@media (max-width: 780px) {
+  .shr-player-inner { grid-template-columns: 1fr; gap: 8px; }
+  .shr-player-left { justify-content: center; }
+  .shr-player-right { justify-content: center; }
+}
 @media (max-width: 640px) {
-  .shr-page { padding: 40px 16px 150px; }
+  .shr-page { padding: 40px 16px 175px; }
   .shr-hero { gap: 22px; margin-bottom: 36px; }
   .shr-hero-cover-wrap, .shr-hero-cover { width: 140px; height: 140px; }
   .shr-hero-actions { width: 100%; }
-  .shr-player-info { width: 90px; }
+  .shr-player { padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); }
+  .shr-player-info { display: none; }
+  .shr-player-left { gap: 0; }
+  .shr-volume-group { display: none; }
   .shr-player-time:first-of-type { display: none; }
 }

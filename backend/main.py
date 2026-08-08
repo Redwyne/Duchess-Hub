@@ -3286,12 +3286,22 @@ def share_public_view(token: str, x_share_password: str = Header(default="")):
         cover_url = f"/soundconnect/covers/track/{track['id']}"
         track_ids = [track["id"]]
         project_type = None
+        parent_folder_id = _cover_track_parent_folder(data, track["id"])
+        workspace_id = data["folders"].get(parent_folder_id, {}).get("workspaceId") if parent_folder_id else None
     else:
         folder = data["folders"][share["targetId"]]
         title, artist = folder["name"], (_share_project_artist_name(data, folder) or "")
         cover_url = f"/soundconnect/covers/folder/{folder['id']}"
         track_ids = _share_collect_track_ids(data, folder["id"])
         project_type = folder.get("projectType")
+        workspace_id = folder.get("workspaceId")
+    # Reprend la palette d'accent exacte de Sound Connect (voir body[data-sc-label]
+    # dans css/style.css) selon le workspace d'origine — un lien ARK a le même
+    # néon-jaune que dans l'app, Theory le même violet, sinon l'ambre par défaut.
+    workspace = data["workspaces"].get(workspace_id) if workspace_id else None
+    label_slug = (workspace.get("slug") if workspace else None) or "duchess"
+    if label_slug not in ("ark", "theory"):
+        label_slug = "duchess"
     tracks = [_share_public_track(data["tracks"][tid]) for tid in track_ids if tid in data["tracks"]]
     return {
         "id": share["id"],
@@ -3301,6 +3311,7 @@ def share_public_view(token: str, x_share_password: str = Header(default="")):
         "artist": artist,
         "projectType": project_type,
         "coverUrl": cover_url,
+        "labelSlug": label_slug,
         "tracks": tracks,
         "permissions": share["permissions"],
         "accessToken": _share_make_access_token(share["id"]),
