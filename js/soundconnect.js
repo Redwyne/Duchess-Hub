@@ -745,7 +745,7 @@
       <div class="sc-tree-row sc-workspace-row" data-tree-kind="workspace" data-id="${ws.id}" data-name="${escapeHtml(ws.name)}">
         ${hasChildren ? `<button type="button" class="sc-tree-toggle ${expanded ? "expanded" : ""}" data-toggle-id="${ws.id}">▸</button>` : `<span class="sc-tree-toggle spacer">▸</span>`}
         <button type="button" class="sc-workspace-item" data-open-id="${ws.id}" data-open-kind="workspace">
-          <span class="sc-workspace-icon">${escapeHtml(initials(ws.name))}</span>
+          <span class="sc-workspace-icon"><img src="${coverUrl("workspace", ws.id)}" alt="" loading="lazy" /></span>
           <span>${escapeHtml(ws.name)}</span>
         </button>
       </div>
@@ -1784,10 +1784,31 @@
     const token = window.DuchessAuth && window.DuchessAuth.getToken ? window.DuchessAuth.getToken() : null;
     return Object.assign({}, extra || {}, token ? { Authorization: `Bearer ${token}` } : {});
   }
-  function fetchShareJSON(path, options) {
+  // Contrairement au reste de Sound Connect, ces routes vérifient VRAIMENT le
+  // jeton côté serveur (Depends(require_admin)) — c'est le premier endroit de
+  // cet onglet où un jeton expiré (20 min, voir js/admin.js) peut réellement
+  // se voir renvoyer un 401, alors que jusque-là scIsAuthed() ne faisait
+  // qu'un contrôle côté client (présence du jeton, jamais son expiration).
+  // Même traitement que callAdmin() dans js/admin.js : sur 401, on renvoie
+  // proprement vers l'écran de connexion plutôt que de laisser un simple
+  // toast d'erreur sans issue.
+  async function fetchShareJSON(path, options) {
     const opts = options || {};
     const headers = shareAuthHeaders(opts.headers);
-    return fetchJSON(path, Object.assign({}, opts, { headers }));
+    const r = await fetch(BACKEND_BASE_URL + path, Object.assign({}, opts, { headers }));
+    if (r.status === 401) {
+      closeShareModal();
+      if (window.DuchessAuth) window.DuchessAuth.requestLogin("soundconnect");
+      const err = new Error("Session expirée — reconnecte-toi, puis rouvre le partage.");
+      err.isAuthExpired = true;
+      throw err;
+    }
+    if (!r.ok) {
+      let detail = r.statusText;
+      try { detail = (await r.json()).detail || detail; } catch (e) {}
+      throw new Error(detail);
+    }
+    return r.json();
   }
 
   let shareModalCtx = null; // { targetType, targetId, displayName }
